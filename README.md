@@ -80,12 +80,21 @@ BigA-Analysis-Agents 使用 Tushare `ts_code` 格式分析 A 股标的，例如
 
 推荐使用 Python 3.13。
 
+使用 uv：
+
 ```bash
-git clone https://github.com/Bronny-62/BigA-Analysis-Agents.git
-cd BigA-Analysis-Agents
+uv sync
+source .venv/bin/activate
+./start.sh
+```
+
+或使用 pip：
+
+```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
+./start.sh
 ```
 
 ## 配置

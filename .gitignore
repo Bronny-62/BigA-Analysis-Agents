@@ -235,7 +235,7 @@ memory/
 checkpoints/
 news_events/
 social_cache/
-social_monitor/
+/social_monitor/
 social_browser/
 browser_profile/
 playwright-profile/
