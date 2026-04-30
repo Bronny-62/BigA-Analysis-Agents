@@ -67,14 +67,47 @@ class NormalizedChatOpenAI(ChatOpenAI):
         use_responses_api=True + with_structured_output. Both paths use OpenAI's
         strict mode and produce the same typed Pydantic instance.
         """
-        if self.model_name == "deepseek-reasoner":
-            raise NotImplementedError(
-                "deepseek-reasoner does not support structured-output tool_choice"
-            )
+        reason = _structured_output_disabled_reason(self)
+        if reason:
+            raise NotImplementedError(reason)
 
         if method is None:
             method = "function_calling"
         return super().with_structured_output(schema, method=method, **kwargs)
+
+
+def _raw_attr(obj: Any, name: str) -> Any:
+    try:
+        return object.__getattribute__(obj, name)
+    except AttributeError:
+        return None
+
+
+def _structured_output_disabled_reason(llm: Any) -> str | None:
+    explicit_reason = _raw_attr(llm, "_tradingagents_structured_output_disabled_reason")
+    if explicit_reason:
+        return str(explicit_reason)
+
+    if _deepseek_structured_output_enabled():
+        return None
+
+    provider = _raw_attr(llm, "_tradingagents_provider") or _raw_attr(llm, "provider")
+    if isinstance(provider, str) and provider.lower() == "deepseek":
+        return "DeepSeek does not reliably support structured-output tool_choice"
+
+    model_name = _raw_attr(llm, "model_name") or _raw_attr(llm, "model")
+    if isinstance(model_name, str) and model_name.lower().startswith("deepseek"):
+        return "DeepSeek does not reliably support structured-output tool_choice"
+    return None
+
+
+def _deepseek_structured_output_enabled() -> bool:
+    return os.getenv("TRADINGAGENTS_ENABLE_DEEPSEEK_STRUCTURED_OUTPUT", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 # Kwargs forwarded from user config to ChatOpenAI
 _PASSTHROUGH_KWARGS = (
@@ -144,7 +177,15 @@ class OpenAIClient(BaseLLMClient):
         if self.provider == "openai":
             llm_kwargs["use_responses_api"] = True
 
-        return NormalizedChatOpenAI(**llm_kwargs)
+        llm = NormalizedChatOpenAI(**llm_kwargs)
+        object.__setattr__(llm, "_tradingagents_provider", self.provider)
+        if self.provider == "deepseek" and not _deepseek_structured_output_enabled():
+            object.__setattr__(
+                llm,
+                "_tradingagents_structured_output_disabled_reason",
+                "DeepSeek does not reliably support structured-output tool_choice",
+            )
+        return llm
 
     def validate_model(self) -> bool:
         """Validate model for the provider."""

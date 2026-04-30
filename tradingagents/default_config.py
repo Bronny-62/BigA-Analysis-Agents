@@ -35,13 +35,26 @@ DEFAULT_CONFIG = {
     "max_debate_rounds": 1,
     "max_risk_discuss_rounds": 1,
     "max_recur_limit": 100,
+    # China A-share defaults
+    "market_region": "cn_a_share",
+    "symbol_format": "tushare_ts_code",
+    "benchmark_symbol": "000300.SH",
+    "benchmark_name": "CSI 300",
+    "realtime_news_enabled": False,
+    "social_monitor_enabled": False,
+    "ifind_enabled": True,
     # Data vendor configuration
     # Category-level configuration (default for all tools in category)
     "data_vendors": {
-        "core_stock_apis": "yfinance",       # Options: alpha_vantage, yfinance
-        "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance
-        "fundamental_data": "yfinance",      # Options: alpha_vantage, yfinance
-        "news_data": "yfinance",             # Options: alpha_vantage, yfinance
+        "market": "tushare,ifind",
+        "social": "social_cache,ifind",
+        "news": "opennews,jin10",
+        "fundamentals": "tushare,cninfo",
+        # Legacy categories are kept for direct imports of old wrapper tools only.
+        "core_stock_apis": "yfinance",
+        "technical_indicators": "yfinance",
+        "fundamental_data": "yfinance",
+        "news_data": "yfinance",
     },
     # Tool-level configuration (takes precedence over category-level)
     "tool_vendors": {

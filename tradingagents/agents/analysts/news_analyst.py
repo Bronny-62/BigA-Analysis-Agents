@@ -1,9 +1,11 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from tradingagents.agents.utils.agent_utils import (
+    get_a_share_announcements,
     build_instrument_context,
-    get_global_news,
+    get_a_share_realtime_news,
+    get_cn_macro_news,
     get_language_instruction,
-    get_news,
+    search_a_share_news,
 )
 from tradingagents.dataflows.config import get_config
 
@@ -14,12 +16,22 @@ def create_news_analyst(llm):
         instrument_context = build_instrument_context(state["company_of_interest"])
 
         tools = [
-            get_news,
-            get_global_news,
+            search_a_share_news,
+            get_a_share_announcements,
+            get_cn_macro_news,
         ]
+        realtime_enabled = bool(get_config().get("realtime_news_enabled", False))
+        if realtime_enabled:
+            tools.insert(1, get_a_share_realtime_news)
 
         system_message = (
-            "You are a news researcher tasked with analyzing recent news and trends over the past week. Please write a comprehensive report of the current state of the world that is relevant for trading and macroeconomics. Use the available tools: get_news(query, start_date, end_date) for company-specific or targeted news searches, and get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
+            "You are the News Analyst for China A-share spot trading. Use search_a_share_news for targeted company, industry, and policy searches, and get_cn_macro_news for China macro, regulatory, liquidity, and market-wide policy context."
+            + (" If available, use get_a_share_realtime_news for cached opennews WebSocket events." if realtime_enabled else "")
+            + " Use get_a_share_announcements for official company announcements such as earnings reports, investor relations records, dividends, contracts, and risk disclosures."
+            + " Prefer broad company-name searches before over-constrained code-plus-keyword searches when a news query returns no rows."
+            + " Focus on policy catalysts, industry-chain events, regulatory actions, company-specific news, and intraday headlines that can affect A-share spot trading."
+            + " If the news tools are unavailable or return no current items, do not invent current news; write a low-confidence coverage note and list exactly what evidence is missing."
+            + " Write only the analyst report. Do not include process narration, tool-use narration, or FINAL TRANSACTION PROPOSAL lines."
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
             + get_language_instruction()
         )
@@ -30,10 +42,7 @@ def create_news_analyst(llm):
                     "system",
                     "You are a helpful AI assistant, collaborating with other assistants."
                     " Use the provided tools to progress towards answering the question."
-                    " If you are unable to fully answer, that's OK; another assistant with different tools"
-                    " will help where you left off. Execute what you can to make progress."
-                    " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
-                    " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
+                    " If you are unable to fully answer, state the coverage gap and confidence clearly."
                     " You have access to the following tools: {tool_names}.\n{system_message}"
                     "For your reference, the current date is {current_date}. {instrument_context}",
                 ),

@@ -8,7 +8,14 @@ from tradingagents.llm_clients.model_catalog import get_model_options
 
 console = Console()
 
-TICKER_INPUT_EXAMPLES = "Examples: SPY, CNC.TO, 7203.T, 0700.HK"
+TICKER_INPUT_EXAMPLES = "Examples: 000001.SZ, 600000.SH, 300750.SZ"
+RESEARCH_DEPTH_SELECT_STYLE = questionary.Style(
+    [
+        ("selected", "fg:yellow noinherit"),
+        ("highlighted", "fg:yellow noinherit"),
+        ("pointer", "fg:yellow noinherit"),
+    ]
+)
 
 ANALYST_ORDER = [
     ("Market Analyst", AnalystType.MARKET),
@@ -20,9 +27,18 @@ ANALYST_ORDER = [
 
 def get_ticker() -> str:
     """Prompt the user to enter a ticker symbol."""
+    from tradingagents.dataflows.a_share_utils import validate_ts_code
+
+    def _validate(value: str) -> bool | str:
+        try:
+            validate_ts_code(value)
+            return True
+        except ValueError as exc:
+            return str(exc)
+
     ticker = questionary.text(
-        f"Enter the exact ticker symbol to analyze ({TICKER_INPUT_EXAMPLES}):",
-        validate=lambda x: len(x.strip()) > 0 or "Please enter a valid ticker symbol.",
+        f"Enter the Tushare ts_code to analyze ({TICKER_INPUT_EXAMPLES}):",
+        validate=_validate,
         style=questionary.Style(
             [
                 ("text", "fg:green"),
@@ -39,8 +55,10 @@ def get_ticker() -> str:
 
 
 def normalize_ticker_symbol(ticker: str) -> str:
-    """Normalize ticker input while preserving exchange suffixes."""
-    return ticker.strip().upper()
+    """Normalize and validate a Tushare ts_code A-share symbol."""
+    from tradingagents.dataflows.a_share_utils import validate_ts_code
+
+    return validate_ts_code(ticker)
 
 
 def get_analysis_date() -> str:
@@ -112,26 +130,41 @@ def select_research_depth() -> int:
         ("Deep - Comprehensive research, in depth debate and strategy discussion", 5),
     ]
 
-    choice = questionary.select(
+    choice = select_with_research_depth_style(
         "Select Your [Research Depth]:",
         choices=[
             questionary.Choice(display, value=value) for display, value in DEPTH_OPTIONS
         ],
-        instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
-        style=questionary.Style(
-            [
-                ("selected", "fg:yellow noinherit"),
-                ("highlighted", "fg:yellow noinherit"),
-                ("pointer", "fg:yellow noinherit"),
-            ]
-        ),
-    ).ask()
+    )
 
     if choice is None:
         console.print("\n[red]No research depth selected. Exiting...[/red]")
         exit(1)
 
     return choice
+
+
+def select_with_research_depth_style(
+    message: str,
+    choices: list,
+    default=None,
+    *,
+    qmark: str = "?",
+    show_instruction: bool = True,
+):
+    """Use the same arrow-key select style as Step 6: Research Depth."""
+    kwargs = {}
+    if default is not None:
+        kwargs["default"] = default
+    instruction = "\n- Use arrow keys to navigate\n- Press Enter to select" if show_instruction else " "
+    return questionary.select(
+        message,
+        choices=choices,
+        qmark=qmark,
+        instruction=instruction,
+        style=RESEARCH_DEPTH_SELECT_STYLE,
+        **kwargs,
+    ).ask()
 
 
 def _fetch_openrouter_models() -> List[Tuple[str, str]]:

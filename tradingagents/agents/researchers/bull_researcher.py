@@ -1,3 +1,7 @@
+from tradingagents.agents.utils.agent_utils import (
+    get_language_instruction,
+    is_chinese_output_language,
+)
 
 
 def create_bull_researcher(llm):
@@ -28,18 +32,20 @@ Latest world affairs news: {news_report}
 Company fundamentals report: {fundamentals_report}
 Conversation history of the debate: {history}
 Last bear argument: {current_response}
-Use this information to deliver a compelling bull argument, refute the bear's concerns, and engage in a dynamic debate that demonstrates the strengths of the bull position.
+Use this information to deliver a compelling bull argument, refute the bear's concerns, and engage in a dynamic debate that demonstrates the strengths of the bull position.{get_language_instruction()}
 """
 
         response = llm.invoke(prompt)
 
-        argument = f"Bull Analyst: {response.content}"
+        display_speaker = "多方研究员" if is_chinese_output_language() else "Bull Analyst"
+        display_argument = f"{display_speaker}: {response.content}"
+        route_argument = f"Bull Analyst: {response.content}"
 
         new_investment_debate_state = {
-            "history": history + "\n" + argument,
-            "bull_history": bull_history + "\n" + argument,
+            "history": history + "\n" + route_argument,
+            "bull_history": bull_history + "\n" + display_argument,
             "bear_history": investment_debate_state.get("bear_history", ""),
-            "current_response": argument,
+            "current_response": route_argument,
             "count": investment_debate_state["count"] + 1,
         }
 

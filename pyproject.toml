@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tradingagents"
-version = "0.2.4"
-description = "TradingAgents: Multi-Agents LLM Financial Trading Framework"
+name = "biga-analysis-agents"
+version = "0.1.0"
+description = "BigA-Analysis-Agents: China A-share multi-agent trading analysis framework"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -27,8 +27,13 @@ dependencies = [
     "typer>=0.21.0",
     "setuptools>=80.9.0",
     "stockstats>=0.6.5",
+    "tushare>=1.4.21",
     "tqdm>=4.67.1",
     "typing-extensions>=4.14.0",
+    "mcp>=1.9.0",
+    "httpx>=0.28.0",
+    "playwright>=1.40.0",
+    "websockets>=15.0.1",
     "yfinance>=0.2.63",
 ]
 

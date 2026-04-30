@@ -4,10 +4,7 @@ import logging
 import os
 from pathlib import Path
 import json
-from datetime import datetime, timedelta
 from typing import Dict, Any, Tuple, List, Optional
-
-import yfinance as yf
 
 logger = logging.getLogger(__name__)
 
@@ -27,16 +24,22 @@ from tradingagents.dataflows.config import set_config
 
 # Import the new abstract tool methods from agent_utils
 from tradingagents.agents.utils.agent_utils import (
-    get_stock_data,
-    get_indicators,
-    get_fundamentals,
-    get_balance_sheet,
-    get_cashflow,
-    get_income_statement,
-    get_news,
-    get_insider_transactions,
-    get_global_news
+    get_a_share_announcements,
+    get_a_share_company_profile,
+    get_a_share_financials,
+    get_a_share_fundamental_snapshot,
+    get_a_share_hotness,
+    get_a_share_indicators,
+    get_a_share_market_snapshot,
+    get_a_share_moneyflow,
+    get_a_share_ohlcv,
+    get_a_share_realtime_news,
+    get_a_share_social_sentiment,
+    get_cn_macro_news,
+    get_social_monitoring_coverage,
+    search_a_share_news,
 )
+from tradingagents.dataflows.tushare_provider import get_return_series
 
 from .checkpointer import checkpoint_step, clear_checkpoint, get_checkpointer, thread_id
 from .conditional_logic import ConditionalLogic
@@ -156,33 +159,33 @@ class TradingAgentsGraph:
         return {
             "market": ToolNode(
                 [
-                    # Core stock data tools
-                    get_stock_data,
-                    # Technical indicators
-                    get_indicators,
+                    get_a_share_ohlcv,
+                    get_a_share_market_snapshot,
+                    get_a_share_indicators,
+                    get_a_share_moneyflow,
                 ]
             ),
             "social": ToolNode(
                 [
-                    # News tools for social media analysis
-                    get_news,
+                    get_a_share_social_sentiment,
+                    get_a_share_hotness,
+                    get_social_monitoring_coverage,
                 ]
             ),
             "news": ToolNode(
                 [
-                    # News and insider information
-                    get_news,
-                    get_global_news,
-                    get_insider_transactions,
+                    search_a_share_news,
+                    get_a_share_announcements,
+                    get_cn_macro_news,
                 ]
+                + ([get_a_share_realtime_news] if self.config.get("realtime_news_enabled", False) else [])
             ),
             "fundamentals": ToolNode(
                 [
-                    # Fundamental analysis tools
-                    get_fundamentals,
-                    get_balance_sheet,
-                    get_cashflow,
-                    get_income_statement,
+                    get_a_share_company_profile,
+                    get_a_share_financials,
+                    get_a_share_announcements,
+                    get_a_share_fundamental_snapshot,
                 ]
             ),
         }
@@ -197,26 +200,15 @@ class TradingAgentsGraph:
         or network error).
         """
         try:
-            start = datetime.strptime(trade_date, "%Y-%m-%d")
-            end = start + timedelta(days=holding_days + 7)  # buffer for weekends/holidays
-            end_str = end.strftime("%Y-%m-%d")
+            raw, stock_days = get_return_series(ticker, trade_date, holding_days)
+            benchmark_symbol = self.config.get("benchmark_symbol", "000300.SH")
+            bench, bench_days = get_return_series(benchmark_symbol, trade_date, holding_days)
 
-            stock = yf.Ticker(ticker).history(start=trade_date, end=end_str)
-            spy = yf.Ticker("SPY").history(start=trade_date, end=end_str)
-
-            if len(stock) < 2 or len(spy) < 2:
+            if raw is None or bench is None:
                 return None, None, None
 
-            actual_days = min(holding_days, len(stock) - 1, len(spy) - 1)
-            raw = float(
-                (stock["Close"].iloc[actual_days] - stock["Close"].iloc[0])
-                / stock["Close"].iloc[0]
-            )
-            spy_ret = float(
-                (spy["Close"].iloc[actual_days] - spy["Close"].iloc[0])
-                / spy["Close"].iloc[0]
-            )
-            alpha = raw - spy_ret
+            actual_days = min(stock_days or holding_days, bench_days or holding_days)
+            alpha = raw - bench
             return raw, alpha, actual_days
         except Exception as e:
             logger.warning(

@@ -21,10 +21,29 @@ RATINGS_5_TIER: Tuple[str, ...] = (
 )
 
 _RATING_SET = {r.lower() for r in RATINGS_5_TIER}
+_RATING_ALIASES = {
+    "buy": "Buy",
+    "overweight": "Overweight",
+    "hold": "Hold",
+    "underweight": "Underweight",
+    "sell": "Sell",
+    "买入": "Buy",
+    "增持": "Overweight",
+    "持有": "Hold",
+    "减持": "Underweight",
+    "卖出": "Sell",
+}
 
-# Matches "Rating: X" / "rating - X" / "Rating: **X**" — tolerates markdown
-# bold wrappers and either a colon or hyphen separator.
-_RATING_LABEL_RE = re.compile(r"rating.*?[:\-][\s*]*(\w+)", re.IGNORECASE)
+# Matches "Rating: X" / "评级：X" / "Rating: **X**" — tolerates markdown
+# bold wrappers and either English or full-width separators.
+_RATING_LABEL_RE = re.compile(
+    r"(?:rating|评级).*?[:：\-－][\s*]*(\w+|买入|增持|持有|减持|卖出)",
+    re.IGNORECASE,
+)
+
+
+def _canonical_rating(value: str) -> str | None:
+    return _RATING_ALIASES.get(value.strip("*:：.,，。").lower())
 
 
 def parse_rating(text: str, default: str = "Hold") -> str:
@@ -38,13 +57,18 @@ def parse_rating(text: str, default: str = "Hold") -> str:
     """
     for line in text.splitlines():
         m = _RATING_LABEL_RE.search(line)
-        if m and m.group(1).lower() in _RATING_SET:
-            return m.group(1).capitalize()
+        if m:
+            rating = _canonical_rating(m.group(1))
+            if rating:
+                return rating
 
     for line in text.splitlines():
+        for alias, rating in _RATING_ALIASES.items():
+            if not alias.isascii() and alias in line:
+                return rating
         for word in line.lower().split():
-            clean = word.strip("*:.,")
-            if clean in _RATING_SET:
-                return clean.capitalize()
+            rating = _canonical_rating(word)
+            if rating:
+                return rating
 
     return default

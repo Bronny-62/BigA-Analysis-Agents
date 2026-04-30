@@ -61,6 +61,12 @@ class TestParseRating:
         for r in RATINGS_5_TIER:
             assert parse_rating(f"Rating: {r}") == r
 
+    def test_chinese_rating_label_sell(self):
+        assert parse_rating("**评级**：卖出\n降低风险暴露。") == "Sell"
+
+    def test_chinese_rating_label_overweight(self):
+        assert parse_rating("评级：增持\n小幅提高仓位。") == "Overweight"
+
 
 # ---------------------------------------------------------------------------
 # SignalProcessor: thin adapter over the heuristic
@@ -73,6 +79,11 @@ class TestSignalProcessor:
         sp = SignalProcessor()
         md = "**Rating**: Overweight\n\n**Executive Summary**: Build gradually."
         assert sp.process_signal(md) == "Overweight"
+
+    def test_returns_rating_from_chinese_pm_markdown(self):
+        sp = SignalProcessor()
+        md = "**评级**: 减持\n\n**执行摘要**: 降低仓位。"
+        assert sp.process_signal(md) == "Underweight"
 
     def test_makes_no_llm_calls(self):
         """SignalProcessor must not invoke the LLM it was constructed with —

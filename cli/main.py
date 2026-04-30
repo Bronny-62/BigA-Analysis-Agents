@@ -1,8 +1,19 @@
 from typing import Optional
+import atexit
 import datetime
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
 import typer
+import questionary
 from pathlib import Path
 from functools import wraps
+from urllib.error import URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 from rich.console import Console
 from dotenv import load_dotenv
 
@@ -30,12 +41,55 @@ from cli.models import AnalystType
 from cli.utils import *
 from cli.announcements import fetch_announcements, display_announcements
 from cli.stats_handler import StatsCallbackHandler
+from tradingagents.agents.utils.agent_utils import is_chinese_output_language
 
 console = Console()
 
+SOCIAL_BROWSER_SESSION_FILE = ".tradingagents_social_browser.json"
+
+
+def localized_report_label(label: str) -> str:
+    if not is_chinese_output_language():
+        return label
+    return {
+        "Analyst Team Reports": "分析师团队报告",
+        "Market Analyst": "市场分析师",
+        "Social Analyst": "社媒情绪分析师",
+        "News Analyst": "新闻分析师",
+        "Fundamentals Analyst": "基本面分析师",
+        "Market Analysis": "市场分析",
+        "Social Sentiment": "社媒情绪",
+        "News Analysis": "新闻分析",
+        "Fundamentals Analysis": "基本面分析",
+        "Research Team Decision": "研究团队决策",
+        "Bull Researcher": "多方研究员",
+        "Bear Researcher": "空方研究员",
+        "Research Manager": "研究经理",
+        "Bull Researcher Analysis": "多方研究员观点",
+        "Bear Researcher Analysis": "空方研究员观点",
+        "Research Manager Decision": "研究经理决策",
+        "Trading Team Plan": "交易团队计划",
+        "Trader": "交易员",
+        "Risk Management Team Decision": "风险管理团队决策",
+        "Aggressive Analyst": "激进风险分析师",
+        "Conservative Analyst": "保守风险分析师",
+        "Neutral Analyst": "中性风险分析师",
+        "Aggressive Analyst Analysis": "激进风险分析师观点",
+        "Conservative Analyst Analysis": "保守风险分析师观点",
+        "Neutral Analyst Analysis": "中性风险分析师观点",
+        "Portfolio Management Decision": "投资组合管理决策",
+        "Portfolio Manager Decision": "投资组合经理决策",
+        "Portfolio Manager": "投资组合经理",
+    }.get(label, label)
+
+
+def localized_risk_label(label: str) -> str:
+    return localized_report_label(label)
+
+
 app = typer.Typer(
     name="TradingAgents",
-    help="TradingAgents CLI: Multi-Agents LLM Financial Trading Framework",
+    help="BigA-Analysis-Agents CLI: China A-share Multi-Agent Analysis Framework",
     add_completion=True,  # Enable shell completion
 )
 
@@ -170,13 +224,13 @@ class MessageBuffer:
         if latest_section and latest_content:
             # Format the current section for display
             section_titles = {
-                "market_report": "Market Analysis",
-                "sentiment_report": "Social Sentiment",
-                "news_report": "News Analysis",
-                "fundamentals_report": "Fundamentals Analysis",
-                "investment_plan": "Research Team Decision",
-                "trader_investment_plan": "Trading Team Plan",
-                "final_trade_decision": "Portfolio Management Decision",
+                "market_report": localized_report_label("Market Analysis"),
+                "sentiment_report": localized_report_label("Social Sentiment"),
+                "news_report": localized_report_label("News Analysis"),
+                "fundamentals_report": localized_report_label("Fundamentals Analysis"),
+                "investment_plan": localized_report_label("Research Team Decision"),
+                "trader_investment_plan": localized_report_label("Trading Team Plan"),
+                "final_trade_decision": localized_report_label("Portfolio Management Decision"),
             }
             self.current_report = (
                 f"### {section_titles[latest_section]}\n{latest_content}"
@@ -191,37 +245,37 @@ class MessageBuffer:
         # Analyst Team Reports - use .get() to handle missing sections
         analyst_sections = ["market_report", "sentiment_report", "news_report", "fundamentals_report"]
         if any(self.report_sections.get(section) for section in analyst_sections):
-            report_parts.append("## Analyst Team Reports")
+            report_parts.append(f"## {localized_report_label('Analyst Team Reports')}")
             if self.report_sections.get("market_report"):
                 report_parts.append(
-                    f"### Market Analysis\n{self.report_sections['market_report']}"
+                    f"### {localized_report_label('Market Analysis')}\n{self.report_sections['market_report']}"
                 )
             if self.report_sections.get("sentiment_report"):
                 report_parts.append(
-                    f"### Social Sentiment\n{self.report_sections['sentiment_report']}"
+                    f"### {localized_report_label('Social Sentiment')}\n{self.report_sections['sentiment_report']}"
                 )
             if self.report_sections.get("news_report"):
                 report_parts.append(
-                    f"### News Analysis\n{self.report_sections['news_report']}"
+                    f"### {localized_report_label('News Analysis')}\n{self.report_sections['news_report']}"
                 )
             if self.report_sections.get("fundamentals_report"):
                 report_parts.append(
-                    f"### Fundamentals Analysis\n{self.report_sections['fundamentals_report']}"
+                    f"### {localized_report_label('Fundamentals Analysis')}\n{self.report_sections['fundamentals_report']}"
                 )
 
         # Research Team Reports
         if self.report_sections.get("investment_plan"):
-            report_parts.append("## Research Team Decision")
+            report_parts.append(f"## {localized_report_label('Research Team Decision')}")
             report_parts.append(f"{self.report_sections['investment_plan']}")
 
         # Trading Team Reports
         if self.report_sections.get("trader_investment_plan"):
-            report_parts.append("## Trading Team Plan")
+            report_parts.append(f"## {localized_report_label('Trading Team Plan')}")
             report_parts.append(f"{self.report_sections['trader_investment_plan']}")
 
         # Portfolio Management Decision
         if self.report_sections.get("final_trade_decision"):
-            report_parts.append("## Portfolio Management Decision")
+            report_parts.append(f"## {localized_report_label('Portfolio Management Decision')}")
             report_parts.append(f"{self.report_sections['final_trade_decision']}")
 
         self.final_report = "\n\n".join(report_parts) if report_parts else None
@@ -233,7 +287,6 @@ message_buffer = MessageBuffer()
 def create_layout():
     layout = Layout()
     layout.split_column(
-        Layout(name="header", size=3),
         Layout(name="main"),
         Layout(name="footer", size=3),
     )
@@ -245,7 +298,6 @@ def create_layout():
     )
     return layout
 
-
 def format_tokens(n):
     """Format token count for display."""
     if n >= 1000:
@@ -253,19 +305,26 @@ def format_tokens(n):
     return str(n)
 
 
-def update_display(layout, spinner_text=None, stats_handler=None, start_time=None):
-    # Header with welcome message
-    layout["header"].update(
-        Panel(
-            "[bold green]Welcome to TradingAgents CLI[/bold green]\n"
-            "[dim]© [Tauric Research](https://github.com/TauricResearch)[/dim]",
-            title="Welcome to TradingAgents",
-            border_style="green",
-            padding=(1, 2),
-            expand=True,
-        )
-    )
+def format_message_preview(content, max_length=160) -> str:
+    """Return a bounded single-line preview for the live terminal table."""
+    if not content:
+        return ""
+    preview = re.sub(r"\s+", " ", str(content)).strip()
+    if len(preview) > max_length:
+        return preview[: max_length - 3].rstrip() + "..."
+    return preview
 
+
+def get_messages_panel_capacity() -> int:
+    """Estimate how many single-line rows fit in the live messages panel."""
+    size = console.size
+    terminal_height = getattr(size, "height", size[1] if isinstance(size, tuple) else 24)
+    upper_height = max(8, int(max(1, terminal_height - 3) * 3 / 8))
+    usable_table_height = upper_height - 7
+    return max(3, min(6, usable_table_height // 2))
+
+
+def update_display(layout, spinner_text=None, stats_handler=None, start_time=None):
     # Progress panel showing agent status
     progress_table = Table(
         show_header=True,
@@ -336,8 +395,9 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
                 status_cell = f"[{status_color}]{status}[/{status_color}]"
             progress_table.add_row("", agent, status_cell)
 
-        # Add horizontal line after each team
-        progress_table.add_row("─" * 20, "─" * 20, "─" * 20, style="dim")
+        # Add horizontal line after each team. Keep it shorter than the fixed
+        # cell width so Rich never truncates it with an ellipsis.
+        progress_table.add_row("─" * 10, "─" * 10, "─" * 10, style="dim")
 
     layout["progress"].update(
         Panel(progress_table, title="Progress", border_style="cyan", padding=(1, 2))
@@ -356,8 +416,8 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
     messages_table.add_column("Time", style="cyan", width=8, justify="center")
     messages_table.add_column("Type", style="green", width=10, justify="center")
     messages_table.add_column(
-        "Content", style="white", no_wrap=False, ratio=1
-    )  # Make content column expand
+        "Content", style="white", no_wrap=True, ratio=1
+    )  # Keep each live-preview row to one line so Live height stays stable.
 
     # Combine tool calls and messages
     all_messages = []
@@ -369,24 +429,21 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
 
     # Add regular messages
     for timestamp, msg_type, content in message_buffer.messages:
-        content_str = str(content) if content else ""
-        if len(content_str) > 200:
-            content_str = content_str[:197] + "..."
+        content_str = format_message_preview(content)
         all_messages.append((timestamp, msg_type, content_str))
 
     # Sort by timestamp descending (newest first)
     all_messages.sort(key=lambda x: x[0], reverse=True)
 
     # Calculate how many messages we can show based on available space
-    max_messages = 12
+    max_messages = get_messages_panel_capacity()
 
     # Get the first N messages (newest ones)
     recent_messages = all_messages[:max_messages]
 
     # Add messages to table (already in newest-first order)
     for timestamp, msg_type, content in recent_messages:
-        # Format content with word wrapping
-        wrapped_content = Text(content, overflow="fold")
+        wrapped_content = Text(content, overflow="ellipsis", no_wrap=True)
         messages_table.add_row(timestamp, msg_type, wrapped_content)
 
     layout["messages"].update(
@@ -418,7 +475,6 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
             )
         )
 
-    # Footer with statistics
     # Agent progress - derived from agent_status dict
     agents_completed = sum(
         1 for status in message_buffer.agent_status.values() if status == "completed"
@@ -468,11 +524,11 @@ def get_user_selections():
 
     # Create welcome box content
     welcome_content = f"{welcome_ascii}\n"
-    welcome_content += "[bold green]TradingAgents: Multi-Agents LLM Financial Trading Framework - CLI[/bold green]\n\n"
+    welcome_content += "[bold green]BigA-Analysis-Agents: China A-share Multi-Agent Analysis CLI[/bold green]\n\n"
     welcome_content += "[bold]Workflow Steps:[/bold]\n"
     welcome_content += "I. Analyst Team → II. Research Team → III. Trader → IV. Risk Management → V. Portfolio Management\n\n"
     welcome_content += (
-        "[dim]Built by [Tauric Research](https://github.com/TauricResearch)[/dim]"
+        "[dim]Forked from TauricResearch/TradingAgents and adapted for China A-share research[/dim]"
     )
 
     # Create and center the welcome box
@@ -480,8 +536,8 @@ def get_user_selections():
         welcome_content,
         border_style="green",
         padding=(1, 2),
-        title="Welcome to TradingAgents",
-        subtitle="Multi-Agents LLM Financial Trading Framework",
+        title="Welcome to BigA-Analysis-Agents",
+        subtitle="China A-share Multi-Agent Trading Analysis",
     )
     console.print(Align.center(welcome_box))
     console.print()
@@ -503,36 +559,46 @@ def get_user_selections():
     console.print(
         create_question_box(
             "Step 1: Ticker Symbol",
-            "Enter the exact ticker symbol to analyze, including exchange suffix when needed (examples: SPY, CNC.TO, 7203.T, 0700.HK)",
-            "SPY",
+            "Enter the Tushare ts_code to analyze (examples: 000001.SZ, 600000.SH, 300750.SZ)",
+            "000001.SZ",
         )
     )
     selected_ticker = get_ticker()
 
-    # Step 2: Analysis date
+    # Step 2: Optional Eastmoney Guba social sentiment setup
+    console.print(
+        create_question_box(
+            "Step 2: Community Sentiment",
+            "Optionally authorize Eastmoney Guba as a Social Analyst data source. The actual collection runs later inside the social analysis workflow.",
+            "No",
+        )
+    )
+    social_monitor_result = setup_eastmoney_guba_for_analysis(selected_ticker)
+
+    # Step 3: Analysis date
     default_date = datetime.datetime.now().strftime("%Y-%m-%d")
     console.print(
         create_question_box(
-            "Step 2: Analysis Date",
+            "Step 3: Analysis Date",
             "Enter the analysis date (YYYY-MM-DD)",
             default_date,
         )
     )
     analysis_date = get_analysis_date()
 
-    # Step 3: Output language
+    # Step 4: Output language
     console.print(
         create_question_box(
-            "Step 3: Output Language",
+            "Step 4: Output Language",
             "Select the language for analyst reports and final decision"
         )
     )
     output_language = ask_output_language()
 
-    # Step 4: Select analysts
+    # Step 5: Select analysts
     console.print(
         create_question_box(
-            "Step 4: Analysts Team", "Select your LLM analyst agents for the analysis"
+            "Step 5: Analysts Team", "Select your LLM analyst agents for the analysis"
         )
     )
     selected_analysts = select_analysts()
@@ -540,32 +606,32 @@ def get_user_selections():
         f"[green]Selected analysts:[/green] {', '.join(analyst.value for analyst in selected_analysts)}"
     )
 
-    # Step 5: Research depth
+    # Step 6: Research depth
     console.print(
         create_question_box(
-            "Step 5: Research Depth", "Select your research depth level"
+            "Step 6: Research Depth", "Select your research depth level"
         )
     )
     selected_research_depth = select_research_depth()
 
-    # Step 6: LLM Provider
+    # Step 7: LLM Provider
     console.print(
         create_question_box(
-            "Step 6: LLM Provider", "Select your LLM provider"
+            "Step 7: LLM Provider", "Select your LLM provider"
         )
     )
     selected_llm_provider, backend_url = select_llm_provider()
 
-    # Step 7: Thinking agents
+    # Step 8: Thinking agents
     console.print(
         create_question_box(
-            "Step 7: Thinking Agents", "Select your thinking agents for analysis"
+            "Step 8: Thinking Agents", "Select your thinking agents for analysis"
         )
     )
     selected_shallow_thinker = select_shallow_thinking_agent(selected_llm_provider)
     selected_deep_thinker = select_deep_thinking_agent(selected_llm_provider)
 
-    # Step 8: Provider-specific thinking configuration
+    # Step 9: Provider-specific thinking configuration
     thinking_level = None
     reasoning_effort = None
     anthropic_effort = None
@@ -574,7 +640,7 @@ def get_user_selections():
     if provider_lower == "google":
         console.print(
             create_question_box(
-                "Step 8: Thinking Mode",
+                "Step 9: Thinking Mode",
                 "Configure Gemini thinking mode"
             )
         )
@@ -582,7 +648,7 @@ def get_user_selections():
     elif provider_lower == "openai":
         console.print(
             create_question_box(
-                "Step 8: Reasoning Effort",
+                "Step 9: Reasoning Effort",
                 "Configure OpenAI reasoning effort level"
             )
         )
@@ -590,7 +656,7 @@ def get_user_selections():
     elif provider_lower == "anthropic":
         console.print(
             create_question_box(
-                "Step 8: Effort Level",
+                "Step 9: Effort Level",
                 "Configure Claude effort level"
             )
         )
@@ -609,12 +675,394 @@ def get_user_selections():
         "openai_reasoning_effort": reasoning_effort,
         "anthropic_effort": anthropic_effort,
         "output_language": output_language,
+        "social_monitor_result": social_monitor_result,
     }
+
+
+def setup_eastmoney_guba_for_analysis(ts_code: str) -> dict:
+    """Optionally open Eastmoney Guba login for later Social Analyst collection."""
+    use_guba = select_with_research_depth_style(
+        "是否启用东方财富股吧社区情绪链路？",
+        choices=[
+            questionary.Choice("是，使用 Chrome 浏览器打开股吧网页，需要您手动登录并完成人机验证", value=True),
+            questionary.Choice("否，暂不需要，不影响后续分析流程", value=False),
+        ],
+        qmark="",
+        show_instruction=False,
+    )
+    if not use_guba:
+        return {"enabled": False, "status": "skipped"}
+
+    try:
+        browser_handle = _open_eastmoney_guba_login_browser(ts_code)
+    except Exception as exc:
+        _handle_social_browser_unavailable(exc)
+        return {"enabled": False, "status": "browser_unavailable", "error": str(exc)}
+
+    choice = _prompt_after_eastmoney_login()
+    if choice == "skip":
+        _close_social_browser(browser_handle)
+        console.print("[yellow]本次调研暂不使用东方财富股吧社区数据。[/yellow]")
+        return {"enabled": False, "status": "login_skipped"}
+    if choice == "exit" or choice is None:
+        _close_social_browser(browser_handle)
+        console.print("[yellow]已退出本次分析流程。[/yellow]")
+        raise typer.Exit(code=0)
+
+    cdp_url = browser_handle.get("cdp_url", "")
+    os.environ["SOCIAL_MONITOR_ENABLED"] = "true"
+    os.environ["SOCIAL_MONITOR_SOURCES"] = "eastmoney_guba"
+    os.environ["SOCIAL_MONITOR_COLLECT_DURING_ANALYSIS"] = "true"
+    if cdp_url:
+        os.environ["SOCIAL_BROWSER_CDP_URL"] = cdp_url
+
+    console.print(
+        "[green]已完成东方财富股吧登录。[/green]"
+        "Chrome 浏览器将保持打开，后续由 Social Analyst 工具统一采集并分析股吧社区数据。"
+    )
+    return {
+        "enabled": True,
+        "status": "login_confirmed",
+        "browser_handle": browser_handle,
+        "cdp_url": cdp_url,
+    }
+
+
+def _prompt_after_eastmoney_login() -> str:
+    console.print(
+        "\n[bold cyan]Chrome 浏览器已打开东方财富股吧页面。[/bold cyan]\n"
+        "请在浏览器中手动登录股吧账号并完成人机验证，然后回到本终端选择下一步："
+    )
+    return select_with_research_depth_style(
+        "选择下一步操作：",
+        choices=[
+            questionary.Choice("我已完成登录，保持浏览器打开并进入下一步配置", value="done"),
+            questionary.Choice("跳过本次东财股吧数据，继续开始调研分析", value="skip"),
+            questionary.Choice("退出本进程", value="exit"),
+        ],
+        qmark="",
+        show_instruction=False,
+    )
+
+
+def _open_eastmoney_guba_login_browser(ts_code: str):
+    from playwright.sync_api import sync_playwright
+    from tradingagents.dataflows.social_monitor.browser_collector import profile_dir
+    from tradingagents.dataflows.social_monitor.sources import EASTMONEY_GUBA, source_url
+
+    profile = profile_dir()
+    profile.mkdir(parents=True, exist_ok=True)
+    target_url = source_url(ts_code, EASTMONEY_GUBA)
+
+    existing = _reuse_existing_social_browser(profile, target_url)
+    if existing:
+        console.print(f"[cyan]复用已打开的 Chrome 股吧页面。Profile: {profile}[/cyan]")
+        return existing
+
+    with sync_playwright() as playwright:
+        executable_path = _resolve_browser_executable_path(playwright)
+
+    port = _find_free_port()
+    cdp_url = f"http://127.0.0.1:{port}"
+    cmd = [
+        executable_path,
+        f"--user-data-dir={profile}",
+        f"--remote-debugging-port={port}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        target_url,
+    ]
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    handle = {"process": process, "cdp_url": cdp_url, "profile": str(profile), "owned": True}
+    try:
+        _wait_for_cdp_endpoint(cdp_url, process)
+    except Exception:
+        _close_social_browser(handle)
+        raise
+    _write_social_browser_session(profile, process.pid, cdp_url)
+    console.print(f"[cyan]Chrome 浏览器已打开股吧网页。Profile: {profile}[/cyan]")
+    return handle
+
+
+def _reuse_existing_social_browser(profile: Path, target_url: str) -> dict | None:
+    for cdp_url in _existing_social_browser_cdp_candidates(profile):
+        if not _cdp_endpoint_ready(cdp_url):
+            continue
+        _open_url_in_existing_cdp(cdp_url, target_url)
+        _write_social_browser_session(profile, None, cdp_url)
+        return {"process": None, "cdp_url": cdp_url, "profile": str(profile), "owned": False}
+    return None
+
+
+def _existing_social_browser_cdp_candidates(profile: Path) -> list[str]:
+    candidates: list[str] = []
+    env_url = os.getenv("SOCIAL_BROWSER_CDP_URL", "").strip()
+    if env_url:
+        candidates.append(env_url)
+
+    session_file = profile / SOCIAL_BROWSER_SESSION_FILE
+    try:
+        data = json.loads(session_file.read_text(encoding="utf-8"))
+        cdp_url = str(data.get("cdp_url", "")).strip()
+        if cdp_url:
+            candidates.append(cdp_url)
+    except Exception:
+        pass
+
+    devtools_port_file = profile / "DevToolsActivePort"
+    try:
+        port = devtools_port_file.read_text(encoding="utf-8").splitlines()[0].strip()
+        if port:
+            candidates.append(f"http://127.0.0.1:{port}")
+    except Exception:
+        pass
+
+    candidates.extend(_running_social_browser_cdp_candidates(profile))
+    return list(dict.fromkeys(candidates))
+
+
+def _running_social_browser_cdp_candidates(profile: Path) -> list[str]:
+    try:
+        output = subprocess.check_output(["ps", "-axo", "command="], text=True, stderr=subprocess.DEVNULL)
+    except Exception:
+        return []
+
+    profile_text = str(profile)
+    candidates: list[str] = []
+    for line in output.splitlines():
+        if "--remote-debugging-port=" not in line or "--user-data-dir=" not in line:
+            continue
+        if profile_text not in line:
+            continue
+        match = re.search(r"--remote-debugging-port=(\d+)", line)
+        if match:
+            candidates.append(f"http://127.0.0.1:{match.group(1)}")
+    return candidates
+
+
+def _cdp_endpoint_ready(cdp_url: str) -> bool:
+    try:
+        with urlopen(f"{cdp_url}/json/version", timeout=0.5) as response:
+            return response.status == 200
+    except Exception:
+        return False
+
+
+def _open_url_in_existing_cdp(cdp_url: str, target_url: str) -> None:
+    encoded = quote(target_url, safe=":/,?&=.%")
+    request = Request(f"{cdp_url}/json/new?{encoded}", method="PUT")
+    try:
+        with urlopen(request, timeout=1.5):
+            return
+    except Exception:
+        return
+
+
+def _write_social_browser_session(profile: Path, pid: int | None, cdp_url: str) -> None:
+    try:
+        payload = {"pid": pid, "cdp_url": cdp_url, "updated_at": time.time()}
+        (profile / SOCIAL_BROWSER_SESSION_FILE).write_text(json.dumps(payload), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _clear_social_browser_session(profile: str | Path | None, cdp_url: str | None = None) -> None:
+    if not profile:
+        return
+    session_file = Path(profile) / SOCIAL_BROWSER_SESSION_FILE
+    try:
+        if cdp_url:
+            data = json.loads(session_file.read_text(encoding="utf-8"))
+            if data.get("cdp_url") != cdp_url:
+                return
+        session_file.unlink()
+    except Exception:
+        pass
+
+
+def _resolve_browser_executable_path(playwright) -> str:
+    for candidate in _browser_executable_candidates(playwright):
+        if not candidate:
+            continue
+        path = Path(candidate).expanduser()
+        if path.exists() and path.is_file() and os.access(path, os.X_OK):
+            return str(path)
+    if _install_playwright_chromium():
+        for candidate in _browser_executable_candidates(playwright):
+            if not candidate:
+                continue
+            path = Path(candidate).expanduser()
+            if path.exists() and path.is_file() and os.access(path, os.X_OK):
+                return str(path)
+    raise RuntimeError(
+        "未找到可启动的 Chrome 浏览器。`pip install -e .` 只会安装 Python 包，"
+        "不会保证浏览器运行时已下载。请安装本机 Google Chrome，或在当前虚拟环境执行 `python -m playwright install chromium`，"
+        "或 `python -m cli.install_runtime_deps`；"
+        "或设置 SOCIAL_BROWSER_EXECUTABLE_PATH 指向本机 Chrome 可执行文件。"
+    )
+
+
+def _install_playwright_chromium() -> bool:
+    if os.getenv("SOCIAL_BROWSER_AUTO_INSTALL", "true").strip().lower() in {"0", "false", "no"}:
+        return False
+    console.print("[yellow]未检测到可用的浏览器运行时，正在安装 Playwright 浏览器运行时...[/yellow]")
+    from cli.install_runtime_deps import install_chromium
+
+    if install_chromium(quiet=True):
+        return True
+    console.print(
+        "[yellow]Playwright 浏览器运行时自动安装失败。请安装本机 Google Chrome，或设置 "
+        "SOCIAL_BROWSER_EXECUTABLE_PATH。[/yellow]"
+    )
+    return False
+
+
+def _browser_executable_candidates(playwright) -> list[str]:
+    candidates: list[str] = []
+    configured = os.getenv("SOCIAL_BROWSER_EXECUTABLE_PATH", "").strip()
+    if configured:
+        candidates.append(configured)
+    try:
+        candidates.append(str(playwright.chromium.executable_path))
+    except Exception:
+        pass
+    candidates.extend(
+        [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+            "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+            "~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "~/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ]
+    )
+    for binary in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome"):
+        found = shutil.which(binary)
+        if found:
+            candidates.append(found)
+    return candidates
+
+
+def _close_social_browser(handle: dict | None) -> None:
+    if not handle:
+        return
+    context = handle.get("context")
+    playwright = handle.get("playwright")
+    try:
+        if context:
+            context.close()
+    except Exception:
+        pass
+    try:
+        if playwright:
+            playwright.stop()
+    except Exception:
+        pass
+    process = handle.get("process")
+    if process and process.poll() is None:
+        if handle.get("owned") is False:
+            return
+        try:
+            process.terminate()
+            process.wait(timeout=5)
+        except Exception:
+            process.kill()
+    if handle.get("owned", True):
+        _clear_social_browser_session(handle.get("profile"), handle.get("cdp_url"))
+
+
+def _find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _wait_for_cdp_endpoint(cdp_url: str, process: subprocess.Popen, timeout: float = 8.0) -> None:
+    deadline = time.time() + timeout
+    last_error: Exception | None = None
+    while time.time() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError("Chrome 浏览器启动后立即退出，无法建立调试连接。")
+        try:
+            with urlopen(f"{cdp_url}/json/version", timeout=0.5) as response:
+                if response.status == 200:
+                    return
+        except (OSError, URLError) as exc:
+            last_error = exc
+        time.sleep(0.2)
+    raise RuntimeError(f"Chrome 浏览器已启动，但调试端口未就绪：{last_error}")
+
+
+def _register_social_browser_cleanup(handle: dict | None) -> None:
+    if not handle:
+        return
+
+    def cleanup() -> None:
+        _close_social_browser(handle)
+
+    atexit.register(cleanup)
+
+
+def _handle_social_browser_unavailable(exc: Exception) -> None:
+    message = str(exc)
+    console.print(
+        "[yellow]未能使用 Chrome 浏览器打开东方财富股吧页面。[/yellow]\n"
+        f"[dim]{message[:500]}[/dim]\n"
+        "如果已执行过 `pip install -e .`，还需要确保本机 Chrome 或浏览器运行时可用：\n"
+        "[bold]python -m cli.install_runtime_deps[/bold]\n"
+        "[bold]./start.sh[/bold]\n"
+        "或设置 SOCIAL_BROWSER_EXECUTABLE_PATH 指向本机 Chrome 可执行文件。\n"
+        "本次调研可以暂不使用东方财富股吧社区数据。"
+    )
+    choice = select_with_research_depth_style(
+        "请选择：",
+        choices=[
+            questionary.Choice("继续开始调研分析，不使用东财股吧社区数据", value="continue"),
+            questionary.Choice("退出本进程", value="exit"),
+        ],
+        qmark="",
+        show_instruction=False,
+    )
+    if choice != "continue":
+        raise typer.Exit(code=0)
+
+
+def _print_social_collection_result(rows: list[dict]) -> None:
+    table = Table(title="Eastmoney Guba Collection", box=box.SIMPLE_HEAVY)
+    for col in ("source", "ts_code", "status", "posts_seen", "posts_inserted", "error"):
+        table.add_column(col)
+    for row in rows:
+        table.add_row(
+            str(row.get("source", "")),
+            str(row.get("ts_code", "")),
+            str(row.get("status", "")),
+            str(row.get("posts_seen", "")),
+            str(row.get("posts_inserted", "")),
+            str(row.get("error", ""))[:120],
+        )
+    console.print(table)
+    if rows and all(row.get("status") in {"error", "no_data"} for row in rows):
+        console.print(
+            "[yellow]未采集到可用东财股吧帖子。完整分析仍会继续，并回退到 iFinD/Tushare/news proxy 等信号。[/yellow]"
+        )
 
 
 def get_ticker():
     """Get ticker symbol from user input."""
-    return typer.prompt("", default="SPY")
+    from tradingagents.dataflows.a_share_utils import validate_ts_code
+
+    while True:
+        ticker = typer.prompt("", default="000001.SZ")
+        try:
+            return validate_ts_code(ticker)
+        except ValueError as exc:
+            console.print(f"[red]Error: {exc}[/red]")
 
 
 def get_analysis_date():
@@ -647,22 +1095,22 @@ def save_report_to_disk(final_state, ticker: str, save_path: Path):
     if final_state.get("market_report"):
         analysts_dir.mkdir(exist_ok=True)
         (analysts_dir / "market.md").write_text(final_state["market_report"], encoding="utf-8")
-        analyst_parts.append(("Market Analyst", final_state["market_report"]))
+        analyst_parts.append((localized_report_label("Market Analyst"), final_state["market_report"]))
     if final_state.get("sentiment_report"):
         analysts_dir.mkdir(exist_ok=True)
         (analysts_dir / "sentiment.md").write_text(final_state["sentiment_report"], encoding="utf-8")
-        analyst_parts.append(("Social Analyst", final_state["sentiment_report"]))
+        analyst_parts.append((localized_report_label("Social Analyst"), final_state["sentiment_report"]))
     if final_state.get("news_report"):
         analysts_dir.mkdir(exist_ok=True)
         (analysts_dir / "news.md").write_text(final_state["news_report"], encoding="utf-8")
-        analyst_parts.append(("News Analyst", final_state["news_report"]))
+        analyst_parts.append((localized_report_label("News Analyst"), final_state["news_report"]))
     if final_state.get("fundamentals_report"):
         analysts_dir.mkdir(exist_ok=True)
         (analysts_dir / "fundamentals.md").write_text(final_state["fundamentals_report"], encoding="utf-8")
-        analyst_parts.append(("Fundamentals Analyst", final_state["fundamentals_report"]))
+        analyst_parts.append((localized_report_label("Fundamentals Analyst"), final_state["fundamentals_report"]))
     if analyst_parts:
         content = "\n\n".join(f"### {name}\n{text}" for name, text in analyst_parts)
-        sections.append(f"## I. Analyst Team Reports\n\n{content}")
+        sections.append(f"## I. {localized_report_label('Analyst Team Reports')}\n\n{content}")
 
     # 2. Research
     if final_state.get("investment_debate_state"):
@@ -672,25 +1120,28 @@ def save_report_to_disk(final_state, ticker: str, save_path: Path):
         if debate.get("bull_history"):
             research_dir.mkdir(exist_ok=True)
             (research_dir / "bull.md").write_text(debate["bull_history"], encoding="utf-8")
-            research_parts.append(("Bull Researcher", debate["bull_history"]))
+            research_parts.append((localized_report_label("Bull Researcher"), debate["bull_history"]))
         if debate.get("bear_history"):
             research_dir.mkdir(exist_ok=True)
             (research_dir / "bear.md").write_text(debate["bear_history"], encoding="utf-8")
-            research_parts.append(("Bear Researcher", debate["bear_history"]))
+            research_parts.append((localized_report_label("Bear Researcher"), debate["bear_history"]))
         if debate.get("judge_decision"):
             research_dir.mkdir(exist_ok=True)
             (research_dir / "manager.md").write_text(debate["judge_decision"], encoding="utf-8")
-            research_parts.append(("Research Manager", debate["judge_decision"]))
+            research_parts.append((localized_report_label("Research Manager"), debate["judge_decision"]))
         if research_parts:
             content = "\n\n".join(f"### {name}\n{text}" for name, text in research_parts)
-            sections.append(f"## II. Research Team Decision\n\n{content}")
+            sections.append(f"## II. {localized_report_label('Research Team Decision')}\n\n{content}")
 
     # 3. Trading
     if final_state.get("trader_investment_plan"):
         trading_dir = save_path / "3_trading"
         trading_dir.mkdir(exist_ok=True)
         (trading_dir / "trader.md").write_text(final_state["trader_investment_plan"], encoding="utf-8")
-        sections.append(f"## III. Trading Team Plan\n\n### Trader\n{final_state['trader_investment_plan']}")
+        sections.append(
+            f"## III. {localized_report_label('Trading Team Plan')}\n\n"
+            f"### {localized_report_label('Trader')}\n{final_state['trader_investment_plan']}"
+        )
 
     # 4. Risk Management
     if final_state.get("risk_debate_state"):
@@ -700,25 +1151,28 @@ def save_report_to_disk(final_state, ticker: str, save_path: Path):
         if risk.get("aggressive_history"):
             risk_dir.mkdir(exist_ok=True)
             (risk_dir / "aggressive.md").write_text(risk["aggressive_history"], encoding="utf-8")
-            risk_parts.append(("Aggressive Analyst", risk["aggressive_history"]))
+            risk_parts.append((localized_report_label("Aggressive Analyst"), risk["aggressive_history"]))
         if risk.get("conservative_history"):
             risk_dir.mkdir(exist_ok=True)
             (risk_dir / "conservative.md").write_text(risk["conservative_history"], encoding="utf-8")
-            risk_parts.append(("Conservative Analyst", risk["conservative_history"]))
+            risk_parts.append((localized_report_label("Conservative Analyst"), risk["conservative_history"]))
         if risk.get("neutral_history"):
             risk_dir.mkdir(exist_ok=True)
             (risk_dir / "neutral.md").write_text(risk["neutral_history"], encoding="utf-8")
-            risk_parts.append(("Neutral Analyst", risk["neutral_history"]))
+            risk_parts.append((localized_report_label("Neutral Analyst"), risk["neutral_history"]))
         if risk_parts:
             content = "\n\n".join(f"### {name}\n{text}" for name, text in risk_parts)
-            sections.append(f"## IV. Risk Management Team Decision\n\n{content}")
+            sections.append(f"## IV. {localized_report_label('Risk Management Team Decision')}\n\n{content}")
 
         # 5. Portfolio Manager
         if risk.get("judge_decision"):
             portfolio_dir = save_path / "5_portfolio"
             portfolio_dir.mkdir(exist_ok=True)
             (portfolio_dir / "decision.md").write_text(risk["judge_decision"], encoding="utf-8")
-            sections.append(f"## V. Portfolio Manager Decision\n\n### Portfolio Manager\n{risk['judge_decision']}")
+            sections.append(
+                f"## V. {localized_report_label('Portfolio Manager Decision')}\n\n"
+                f"### {localized_report_label('Portfolio Manager')}\n{risk['judge_decision']}"
+            )
 
     # Write consolidated report
     header = f"# Trading Analysis Report: {ticker}\n\nGenerated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
@@ -734,15 +1188,15 @@ def display_complete_report(final_state):
     # I. Analyst Team Reports
     analysts = []
     if final_state.get("market_report"):
-        analysts.append(("Market Analyst", final_state["market_report"]))
+        analysts.append((localized_report_label("Market Analyst"), final_state["market_report"]))
     if final_state.get("sentiment_report"):
-        analysts.append(("Social Analyst", final_state["sentiment_report"]))
+        analysts.append((localized_report_label("Social Analyst"), final_state["sentiment_report"]))
     if final_state.get("news_report"):
-        analysts.append(("News Analyst", final_state["news_report"]))
+        analysts.append((localized_report_label("News Analyst"), final_state["news_report"]))
     if final_state.get("fundamentals_report"):
-        analysts.append(("Fundamentals Analyst", final_state["fundamentals_report"]))
+        analysts.append((localized_report_label("Fundamentals Analyst"), final_state["fundamentals_report"]))
     if analysts:
-        console.print(Panel("[bold]I. Analyst Team Reports[/bold]", border_style="cyan"))
+        console.print(Panel(f"[bold]I. {localized_report_label('Analyst Team Reports')}[/bold]", border_style="cyan"))
         for title, content in analysts:
             console.print(Panel(Markdown(content), title=title, border_style="blue", padding=(1, 2)))
 
@@ -751,40 +1205,40 @@ def display_complete_report(final_state):
         debate = final_state["investment_debate_state"]
         research = []
         if debate.get("bull_history"):
-            research.append(("Bull Researcher", debate["bull_history"]))
+            research.append((localized_report_label("Bull Researcher"), debate["bull_history"]))
         if debate.get("bear_history"):
-            research.append(("Bear Researcher", debate["bear_history"]))
+            research.append((localized_report_label("Bear Researcher"), debate["bear_history"]))
         if debate.get("judge_decision"):
-            research.append(("Research Manager", debate["judge_decision"]))
+            research.append((localized_report_label("Research Manager"), debate["judge_decision"]))
         if research:
-            console.print(Panel("[bold]II. Research Team Decision[/bold]", border_style="magenta"))
+            console.print(Panel(f"[bold]II. {localized_report_label('Research Team Decision')}[/bold]", border_style="magenta"))
             for title, content in research:
                 console.print(Panel(Markdown(content), title=title, border_style="blue", padding=(1, 2)))
 
     # III. Trading Team
     if final_state.get("trader_investment_plan"):
-        console.print(Panel("[bold]III. Trading Team Plan[/bold]", border_style="yellow"))
-        console.print(Panel(Markdown(final_state["trader_investment_plan"]), title="Trader", border_style="blue", padding=(1, 2)))
+        console.print(Panel(f"[bold]III. {localized_report_label('Trading Team Plan')}[/bold]", border_style="yellow"))
+        console.print(Panel(Markdown(final_state["trader_investment_plan"]), title=localized_report_label("Trader"), border_style="blue", padding=(1, 2)))
 
     # IV. Risk Management Team
     if final_state.get("risk_debate_state"):
         risk = final_state["risk_debate_state"]
         risk_reports = []
         if risk.get("aggressive_history"):
-            risk_reports.append(("Aggressive Analyst", risk["aggressive_history"]))
+            risk_reports.append((localized_report_label("Aggressive Analyst"), risk["aggressive_history"]))
         if risk.get("conservative_history"):
-            risk_reports.append(("Conservative Analyst", risk["conservative_history"]))
+            risk_reports.append((localized_report_label("Conservative Analyst"), risk["conservative_history"]))
         if risk.get("neutral_history"):
-            risk_reports.append(("Neutral Analyst", risk["neutral_history"]))
+            risk_reports.append((localized_report_label("Neutral Analyst"), risk["neutral_history"]))
         if risk_reports:
-            console.print(Panel("[bold]IV. Risk Management Team Decision[/bold]", border_style="red"))
+            console.print(Panel(f"[bold]IV. {localized_report_label('Risk Management Team Decision')}[/bold]", border_style="red"))
             for title, content in risk_reports:
                 console.print(Panel(Markdown(content), title=title, border_style="blue", padding=(1, 2)))
 
         # V. Portfolio Manager Decision
         if risk.get("judge_decision"):
-            console.print(Panel("[bold]V. Portfolio Manager Decision[/bold]", border_style="green"))
-            console.print(Panel(Markdown(risk["judge_decision"]), title="Portfolio Manager", border_style="blue", padding=(1, 2)))
+            console.print(Panel(f"[bold]V. {localized_report_label('Portfolio Manager Decision')}[/bold]", border_style="green"))
+            console.print(Panel(Markdown(risk["judge_decision"]), title=localized_report_label("Portfolio Manager"), border_style="blue", padding=(1, 2)))
 
 
 def update_research_team_status(status):
@@ -921,14 +1375,14 @@ def classify_message_type(message) -> tuple[str, str | None]:
 
 def format_tool_args(args, max_length=80) -> str:
     """Format tool arguments for terminal display."""
-    result = str(args)
-    if len(result) > max_length:
-        return result[:max_length - 3] + "..."
-    return result
+    return format_message_preview(args, max_length=max_length)
 
 def run_analysis(checkpoint: bool = False):
     # First get all user selections
     selections = get_user_selections()
+    social_browser_handle = selections.get("social_monitor_result", {}).get("browser_handle")
+    if social_browser_handle:
+        _register_social_browser_cleanup(social_browser_handle)
 
     # Create config with selected research depth
     config = DEFAULT_CONFIG.copy()
@@ -1016,10 +1470,21 @@ def run_analysis(checkpoint: bool = False):
 
     # Now start the display layout
     layout = create_layout()
+    with Live(
+        layout,
+        refresh_per_second=4,
+        vertical_overflow="crop",
+    ) as live:
+        def refresh_display(spinner_text=None):
+            update_display(
+                layout,
+                spinner_text=spinner_text,
+                stats_handler=stats_handler,
+                start_time=start_time,
+            )
 
-    with Live(layout, refresh_per_second=4) as live:
         # Initial display
-        update_display(layout, stats_handler=stats_handler, start_time=start_time)
+        refresh_display()
 
         # Add initial messages
         message_buffer.add_message("System", f"Selected ticker: {selections['ticker']}")
@@ -1030,18 +1495,18 @@ def run_analysis(checkpoint: bool = False):
             "System",
             f"Selected analysts: {', '.join(analyst.value for analyst in selections['analysts'])}",
         )
-        update_display(layout, stats_handler=stats_handler, start_time=start_time)
+        refresh_display()
 
         # Update agent status to in_progress for the first analyst
         first_analyst = f"{selections['analysts'][0].value.capitalize()} Analyst"
         message_buffer.update_agent_status(first_analyst, "in_progress")
-        update_display(layout, stats_handler=stats_handler, start_time=start_time)
+        refresh_display()
 
         # Create spinner text
         spinner_text = (
             f"Analyzing {selections['ticker']} on {selections['analysis_date']}..."
         )
-        update_display(layout, spinner_text, stats_handler=stats_handler, start_time=start_time)
+        refresh_display(spinner_text)
 
         # Initialize state and get graph args with callbacks
         init_agent_state = graph.propagator.create_initial_state(
@@ -1088,15 +1553,15 @@ def run_analysis(checkpoint: bool = False):
                     update_research_team_status("in_progress")
                 if bull_hist:
                     message_buffer.update_report_section(
-                        "investment_plan", f"### Bull Researcher Analysis\n{bull_hist}"
+                        "investment_plan", f"### {localized_report_label('Bull Researcher Analysis')}\n{bull_hist}"
                     )
                 if bear_hist:
                     message_buffer.update_report_section(
-                        "investment_plan", f"### Bear Researcher Analysis\n{bear_hist}"
+                        "investment_plan", f"### {localized_report_label('Bear Researcher Analysis')}\n{bear_hist}"
                     )
                 if judge:
                     message_buffer.update_report_section(
-                        "investment_plan", f"### Research Manager Decision\n{judge}"
+                        "investment_plan", f"### {localized_report_label('Research Manager Decision')}\n{judge}"
                     )
                     update_research_team_status("completed")
                     message_buffer.update_agent_status("Trader", "in_progress")
@@ -1122,25 +1587,25 @@ def run_analysis(checkpoint: bool = False):
                     if message_buffer.agent_status.get("Aggressive Analyst") != "completed":
                         message_buffer.update_agent_status("Aggressive Analyst", "in_progress")
                     message_buffer.update_report_section(
-                        "final_trade_decision", f"### Aggressive Analyst Analysis\n{agg_hist}"
+                        "final_trade_decision", f"### {localized_report_label('Aggressive Analyst Analysis')}\n{agg_hist}"
                     )
                 if con_hist:
                     if message_buffer.agent_status.get("Conservative Analyst") != "completed":
                         message_buffer.update_agent_status("Conservative Analyst", "in_progress")
                     message_buffer.update_report_section(
-                        "final_trade_decision", f"### Conservative Analyst Analysis\n{con_hist}"
+                        "final_trade_decision", f"### {localized_report_label('Conservative Analyst Analysis')}\n{con_hist}"
                     )
                 if neu_hist:
                     if message_buffer.agent_status.get("Neutral Analyst") != "completed":
                         message_buffer.update_agent_status("Neutral Analyst", "in_progress")
                     message_buffer.update_report_section(
-                        "final_trade_decision", f"### Neutral Analyst Analysis\n{neu_hist}"
+                        "final_trade_decision", f"### {localized_report_label('Neutral Analyst Analysis')}\n{neu_hist}"
                     )
                 if judge:
                     if message_buffer.agent_status.get("Portfolio Manager") != "completed":
                         message_buffer.update_agent_status("Portfolio Manager", "in_progress")
                         message_buffer.update_report_section(
-                            "final_trade_decision", f"### Portfolio Manager Decision\n{judge}"
+                            "final_trade_decision", f"### {localized_report_label('Portfolio Manager Decision')}\n{judge}"
                         )
                         message_buffer.update_agent_status("Aggressive Analyst", "completed")
                         message_buffer.update_agent_status("Conservative Analyst", "completed")
@@ -1148,7 +1613,7 @@ def run_analysis(checkpoint: bool = False):
                         message_buffer.update_agent_status("Portfolio Manager", "completed")
 
             # Update the display
-            update_display(layout, stats_handler=stats_handler, start_time=start_time)
+            refresh_display()
 
             trace.append(chunk)
 
@@ -1169,7 +1634,12 @@ def run_analysis(checkpoint: bool = False):
             if section in final_state:
                 message_buffer.update_report_section(section, final_state[section])
 
-        update_display(layout, stats_handler=stats_handler, start_time=start_time)
+        refresh_display()
+
+    if social_browser_handle:
+        _close_social_browser(social_browser_handle)
+        social_browser_handle = None
+        os.environ.pop("SOCIAL_BROWSER_CDP_URL", None)
 
     # Post-analysis prompts (outside Live context for clean interaction)
     console.print("\n[bold cyan]Analysis Complete![/bold cyan]\n")
@@ -1215,6 +1685,148 @@ def analyze(
         n = clear_all_checkpoints(DEFAULT_CONFIG["data_cache_dir"])
         console.print(f"[yellow]Cleared {n} checkpoint(s).[/yellow]")
     run_analysis(checkpoint=checkpoint)
+
+
+@app.command()
+def social_login(
+    symbol: str = typer.Option(
+        "300750.SZ",
+        "--symbol",
+        help="Tushare ts_code whose Eastmoney Guba page should be opened.",
+    ),
+):
+    """Open a persistent browser profile for manual Eastmoney Guba login."""
+    from tradingagents.dataflows.a_share_utils import validate_ts_code
+
+    ts_code = validate_ts_code(symbol)
+    console.print(
+        "[cyan]Opening a persistent Eastmoney Guba browser profile.[/cyan]\n"
+        "Log in manually. Cookies stay in your local profile only."
+    )
+    handle = _open_eastmoney_guba_login_browser(ts_code)
+    try:
+        questionary.select(
+            "登录完成后回到终端选择：",
+            choices=[questionary.Choice("我已完成登录，关闭浏览器", value="done")],
+        ).ask()
+    finally:
+        _close_social_browser(handle)
+
+
+@app.command()
+def social_monitor(
+    symbols: str = typer.Option(
+        ...,
+        "--symbols",
+        help="Comma-separated Tushare ts_codes, e.g. 300750.SZ,000001.SZ.",
+    ),
+    once: bool = typer.Option(
+        False,
+        "--once",
+        help="Run one collection pass and exit. Used by default when --loop is not set.",
+    ),
+    loop: bool = typer.Option(
+        False,
+        "--loop",
+        help="Run continuously using SOCIAL_MONITOR_INTERVAL_SECONDS.",
+    ),
+    sources: str = typer.Option(
+        "",
+        "--sources",
+        help="Comma-separated sources: eastmoney_guba,xueqiu. Defaults to env/config.",
+    ),
+    scroll_seconds: int = typer.Option(
+        90,
+        "--scroll-seconds",
+        help="Seconds to scroll/listen per source and symbol.",
+    ),
+    max_posts: int = typer.Option(
+        0,
+        "--max-posts",
+        help="Maximum posts per symbol/source. Defaults to SOCIAL_MONITOR_MAX_POSTS_PER_SYMBOL.",
+    ),
+    max_pages: int = typer.Option(
+        0,
+        "--max-pages",
+        help="Maximum pages per symbol/source for paginated sources. Defaults to SOCIAL_MONITOR_MAX_PAGES.",
+    ),
+    headed: bool = typer.Option(
+        False,
+        "--headed",
+        help="Show browser during collection. Useful for diagnosing login or verification pages.",
+    ),
+):
+    """Collect Eastmoney Guba/Xueqiu forum posts using an authorized browser session."""
+    from tradingagents.dataflows.a_share_utils import validate_ts_code
+    from tradingagents.dataflows.social_monitor.runner import collect_loop, collect_once
+    from tradingagents.dataflows.social_monitor.sources import parse_sources
+
+    symbol_list = [validate_ts_code(item.strip()) for item in symbols.split(",") if item.strip()]
+    if not symbol_list:
+        raise typer.BadParameter("At least one symbol is required.")
+    source_list = parse_sources(sources) if sources else None
+    max_posts_value = max_posts if max_posts > 0 else None
+    max_pages_value = max_pages if max_pages > 0 else None
+    if loop:
+        console.print(f"[cyan]Starting social monitor loop for {', '.join(symbol_list)}.[/cyan]")
+        collect_loop(
+            symbol_list,
+            source_list,
+            scroll_seconds=scroll_seconds,
+            max_posts_per_symbol=max_posts_value,
+            headless=not headed,
+            max_pages_per_symbol=max_pages_value,
+        )
+        return
+
+    console.print(f"[cyan]Running one social monitor pass for {', '.join(symbol_list)}.[/cyan]")
+    rows = collect_once(
+        symbol_list,
+        source_list,
+        scroll_seconds=scroll_seconds,
+        max_posts_per_symbol=max_posts_value,
+        headless=not headed,
+        max_pages_per_symbol=max_pages_value,
+    )
+    table = Table(title="Social Monitor Results", box=box.SIMPLE_HEAVY)
+    for col in ("source", "ts_code", "status", "posts_seen", "posts_inserted", "error"):
+        table.add_column(col)
+    for row in rows:
+        table.add_row(
+            str(row.get("source", "")),
+            str(row.get("ts_code", "")),
+            str(row.get("status", "")),
+            str(row.get("posts_seen", "")),
+            str(row.get("posts_inserted", "")),
+            str(row.get("error", ""))[:120],
+        )
+    console.print(table)
+
+
+@app.command()
+def ifind_smoke(
+    symbol: str = typer.Option(
+        "300750.SZ",
+        "--symbol",
+        help="Tushare ts_code to query through iFinD QuantAPI.",
+    ),
+):
+    """Run a read-only iFinD QuantAPI connectivity smoke test."""
+    from tradingagents.dataflows.a_share_utils import validate_ts_code
+    from tradingagents.dataflows import ifind_provider
+
+    ts_code = validate_ts_code(symbol)
+    console.print(Markdown(ifind_provider.status()))
+    if not ifind_provider.is_enabled():
+        console.print("[yellow]iFinD is disabled by IFIND_ENABLED=false.[/yellow]")
+        return
+    if not ifind_provider.has_credentials():
+        console.print(
+            "[yellow]No iFinD token found. Set IFIND_ACCESS_TOKEN and/or IFIND_REFRESH_TOKEN in .env.[/yellow]"
+        )
+        return
+    console.print(Markdown(ifind_provider.real_time_quote(ts_code)))
+    console.print(Markdown(ifind_provider.popularity_signal(ts_code)))
 
 
 if __name__ == "__main__":

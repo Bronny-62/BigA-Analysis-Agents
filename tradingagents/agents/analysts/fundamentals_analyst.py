@@ -1,14 +1,12 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from tradingagents.agents.utils.agent_utils import (
+    get_a_share_announcements,
     build_instrument_context,
-    get_balance_sheet,
-    get_cashflow,
-    get_fundamentals,
-    get_income_statement,
-    get_insider_transactions,
+    get_a_share_company_profile,
+    get_a_share_financials,
+    get_a_share_fundamental_snapshot,
     get_language_instruction,
 )
-from tradingagents.dataflows.config import get_config
 
 
 def create_fundamentals_analyst(llm):
@@ -17,17 +15,18 @@ def create_fundamentals_analyst(llm):
         instrument_context = build_instrument_context(state["company_of_interest"])
 
         tools = [
-            get_fundamentals,
-            get_balance_sheet,
-            get_cashflow,
-            get_income_statement,
+            get_a_share_company_profile,
+            get_a_share_financials,
+            get_a_share_announcements,
+            get_a_share_fundamental_snapshot,
         ]
 
         system_message = (
-            "You are a researcher tasked with analyzing fundamental information over the past week about a company. Please write a comprehensive report of the company's fundamental information such as financial documents, company profile, basic company financials, and company financial history to gain a full view of the company's fundamental information to inform traders. Make sure to include as much detail as possible. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
+            "You are the Fundamentals Analyst for China A-share spot trading. Analyze company profile, financial statements, financial indicators, dividends, share float, earnings forecasts or express reports, and Cninfo announcements. Pay special attention to A-share events: earnings preview, annual/interim/quarterly reports, major contracts, restructuring, pledge risk, unlocking pressure, buybacks, dividends, regulatory inquiry letters, and abnormal disclosure risk."
             + " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."
-            + " Use the available tools: `get_fundamentals` for comprehensive company analysis, `get_balance_sheet`, `get_cashflow`, and `get_income_statement` for specific financial statements."
-            + get_language_instruction(),
+            + " Use get_a_share_company_profile, get_a_share_financials, get_a_share_announcements, and get_a_share_fundamental_snapshot. The announcements tool tries Tushare first and falls back to Cninfo when the separate Tushare announcement permission is not available."
+            + " Write only the analyst report. Do not include process narration, tool-use narration, or FINAL TRANSACTION PROPOSAL lines."
+            + get_language_instruction()
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -36,10 +35,7 @@ def create_fundamentals_analyst(llm):
                     "system",
                     "You are a helpful AI assistant, collaborating with other assistants."
                     " Use the provided tools to progress towards answering the question."
-                    " If you are unable to fully answer, that's OK; another assistant with different tools"
-                    " will help where you left off. Execute what you can to make progress."
-                    " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
-                    " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
+                    " If you are unable to fully answer, state the coverage gap and confidence clearly."
                     " You have access to the following tools: {tool_names}.\n{system_message}"
                     "For your reference, the current date is {current_date}. {instrument_context}",
                 ),

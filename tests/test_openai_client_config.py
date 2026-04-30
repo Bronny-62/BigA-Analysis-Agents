@@ -12,13 +12,14 @@ from tradingagents.llm_clients.openai_client import NormalizedChatOpenAI
 class TestOpenAICompatibleProviderConfig(unittest.TestCase):
     @patch("tradingagents.llm_clients.openai_client.NormalizedChatOpenAI")
     def test_explicit_base_url_overrides_provider_default(self, mock_chat):
-        client = OpenAIClient(
-            "qwen-plus",
-            base_url="https://custom.example/v1",
-            provider="qwen",
-        )
+        with patch.dict("os.environ", {"DASHSCOPE_API_KEY": "placeholder"}):
+            client = OpenAIClient(
+                "qwen-plus",
+                base_url="https://custom.example/v1",
+                provider="qwen",
+            )
 
-        client.get_llm()
+            client.get_llm()
 
         call_kwargs = mock_chat.call_args[1]
         self.assertEqual(call_kwargs["base_url"], "https://custom.example/v1")
@@ -26,9 +27,10 @@ class TestOpenAICompatibleProviderConfig(unittest.TestCase):
 
     @patch("tradingagents.llm_clients.openai_client.NormalizedChatOpenAI")
     def test_qwen_default_base_url_matches_cli_provider_url(self, mock_chat):
-        client = OpenAIClient("qwen-plus", provider="qwen")
+        with patch.dict("os.environ", {"DASHSCOPE_API_KEY": "placeholder"}):
+            client = OpenAIClient("qwen-plus", provider="qwen")
 
-        client.get_llm()
+            client.get_llm()
 
         call_kwargs = mock_chat.call_args[1]
         self.assertEqual(
@@ -84,11 +86,40 @@ class TestOpenAICompatibleProviderConfig(unittest.TestCase):
             "Private reasoning that DeepSeek requires.",
         )
 
-    def test_deepseek_reasoner_skips_structured_output_tool_choice(self):
-        llm = NormalizedChatOpenAI(model="deepseek-reasoner", api_key="test")
+    def test_deepseek_models_skip_structured_output_tool_choice(self):
+        for model in ("deepseek-reasoner", "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat"):
+            with self.subTest(model=model), patch.dict(
+                "os.environ",
+                {"TRADINGAGENTS_ENABLE_DEEPSEEK_STRUCTURED_OUTPUT": ""},
+            ):
+                llm = NormalizedChatOpenAI(model=model, api_key="test")
 
-        with self.assertRaisesRegex(NotImplementedError, "deepseek-reasoner"):
-            llm.with_structured_output(dict)
+                with self.assertRaisesRegex(NotImplementedError, "DeepSeek"):
+                    llm.with_structured_output(dict)
+
+    @patch("tradingagents.llm_clients.openai_client.NormalizedChatOpenAI")
+    def test_deepseek_provider_marks_structured_output_disabled(self, mock_chat):
+        with patch.dict(
+            "os.environ",
+            {"DEEPSEEK_API_KEY": "placeholder", "TRADINGAGENTS_ENABLE_DEEPSEEK_STRUCTURED_OUTPUT": ""},
+        ):
+            client = OpenAIClient("deepseek-v4-pro", provider="deepseek")
+            llm = client.get_llm()
+
+        self.assertEqual(llm._tradingagents_provider, "deepseek")
+        self.assertIn("DeepSeek", llm._tradingagents_structured_output_disabled_reason)
+
+    @patch("tradingagents.llm_clients.openai_client.NormalizedChatOpenAI")
+    def test_deepseek_structured_output_escape_hatch(self, mock_chat):
+        with patch.dict(
+            "os.environ",
+            {"DEEPSEEK_API_KEY": "placeholder", "TRADINGAGENTS_ENABLE_DEEPSEEK_STRUCTURED_OUTPUT": "1"},
+        ):
+            client = OpenAIClient("deepseek-v4-pro", provider="deepseek")
+            llm = client.get_llm()
+
+        self.assertEqual(llm._tradingagents_provider, "deepseek")
+        self.assertNotIn("_tradingagents_structured_output_disabled_reason", llm.__dict__)
 
 
 if __name__ == "__main__":

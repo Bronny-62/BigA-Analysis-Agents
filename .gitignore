@@ -149,6 +149,9 @@ activemq-data/
 
 # Environments
 .env
+.env.*
+!.env.example
+!.env.enterprise.example
 .envrc
 .venv
 env/
@@ -217,6 +220,39 @@ __marimo__/
 
 # Cache
 **/data_cache/
+cache/
+.data/
+.tradingagents/
+
+# TradingAgents local runtime state
+reports/
+logs/
+memory/
+checkpoints/
+news_events/
+social_cache/
+social_monitor/
+social_browser/
+browser_profile/
+playwright-profile/
+
+# Local databases and event streams
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.jsonl
+
+# Browser/session captures that may contain cookies or auth headers
+cookies*.txt
+*cookie*.json
+storage_state*.json
+*.har
+*.trace.zip
+test-results/
+playwright-report/
+screenshots/
+videos/
 
 # macOS
 .DS_Store

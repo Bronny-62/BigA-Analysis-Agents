@@ -19,6 +19,7 @@ all three agents log the same warnings when fallback fires.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Callable, Optional, TypeVar
 
 from pydantic import BaseModel
@@ -28,12 +29,47 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 
+def _raw_attr(obj: Any, name: str) -> Any:
+    try:
+        return object.__getattribute__(obj, name)
+    except AttributeError:
+        return None
+
+
+def _structured_output_disabled_reason(llm: Any) -> str | None:
+    explicit_reason = _raw_attr(llm, "_tradingagents_structured_output_disabled_reason")
+    if explicit_reason:
+        return str(explicit_reason)
+
+    if os.getenv("TRADINGAGENTS_ENABLE_DEEPSEEK_STRUCTURED_OUTPUT", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return None
+
+    provider = _raw_attr(llm, "_tradingagents_provider") or _raw_attr(llm, "provider")
+    if isinstance(provider, str) and provider.lower() == "deepseek":
+        return "DeepSeek does not reliably support structured-output tool_choice"
+
+    model_name = _raw_attr(llm, "model_name") or _raw_attr(llm, "model")
+    if isinstance(model_name, str) and model_name.lower().startswith("deepseek"):
+        return "DeepSeek does not reliably support structured-output tool_choice"
+    return None
+
+
 def bind_structured(llm: Any, schema: type[T], agent_name: str) -> Optional[Any]:
     """Return ``llm.with_structured_output(schema)`` or ``None`` if unsupported.
 
     Logs a warning when the binding fails so the user understands the agent
     will use free-text generation for every call instead of one-shot fallback.
     """
+    disabled_reason = _structured_output_disabled_reason(llm)
+    if disabled_reason:
+        logger.info(
+            "%s: structured output is disabled for this model (%s); "
+            "falling back to free-text generation",
+            agent_name,
+            disabled_reason,
+        )
+        return None
+
     try:
         return llm.with_structured_output(schema)
     except (NotImplementedError, AttributeError) as exc:

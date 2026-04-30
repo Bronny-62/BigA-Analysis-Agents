@@ -1,271 +1,280 @@
-<p align="center">
-  <img src="assets/TauricResearch.png" style="width: 60%; height: auto;">
-</p>
+# BigA-Analysis-Agents
 
-<div align="center" style="line-height: 1;">
-  <a href="https://arxiv.org/abs/2412.20138" target="_blank"><img alt="arXiv" src="https://img.shields.io/badge/arXiv-2412.20138-B31B1B?logo=arxiv"/></a>
-  <a href="https://discord.com/invite/hk9PGKShPK" target="_blank"><img alt="Discord" src="https://img.shields.io/badge/Discord-TradingResearch-7289da?logo=discord&logoColor=white&color=7289da"/></a>
-  <a href="./assets/wechat.png" target="_blank"><img alt="WeChat" src="https://img.shields.io/badge/WeChat-TauricResearch-brightgreen?logo=wechat&logoColor=white"/></a>
-  <a href="https://x.com/TauricResearch" target="_blank"><img alt="X Follow" src="https://img.shields.io/badge/X-TauricResearch-white?logo=x&logoColor=white"/></a>
-  <br>
-  <a href="https://github.com/TauricResearch/" target="_blank"><img alt="Community" src="https://img.shields.io/badge/Join_GitHub_Community-TauricResearch-14C290?logo=discourse"/></a>
-</div>
+BigA-Analysis-Agents is a China A-share focused fork of
+[TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents).
+It keeps the original multi-agent research workflow, but replaces the original
+US-market data assumptions with an A-share spot trading analysis stack.
 
-<div align="center">
-  <!-- Keep these links. Translations will automatically update with the README. -->
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=de">Deutsch</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=es">Español</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=fr">français</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=ja">日本語</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=ko">한국어</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=pt">Português</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=ru">Русский</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=zh">中文</a>
-</div>
+The system is designed for research and decision support. It does not place
+orders, does not provide guaranteed returns, and does not constitute investment,
+financial, or trading advice.
 
----
+## What This Fork Does
 
-# TradingAgents: Multi-Agents LLM Financial Trading Framework
+BigA-Analysis-Agents analyzes China A-share symbols in Tushare `ts_code` format,
+for example:
 
-## News
-- [2026-04] **TradingAgents v0.2.4** released with structured-output agents (Research Manager, Trader, Portfolio Manager), LangGraph checkpoint resume, persistent decision log, DeepSeek/Qwen/GLM/Azure provider support, Docker, and a Windows UTF-8 encoding fix. See [CHANGELOG.md](CHANGELOG.md) for the full list.
-- [2026-03] **TradingAgents v0.2.3** released with multi-language support, GPT-5.4 family models, unified model catalog, backtesting date fidelity, and proxy support.
-- [2026-03] **TradingAgents v0.2.2** released with GPT-5.4/Gemini 3.1/Claude 4.6 model coverage, five-tier rating scale, OpenAI Responses API, Anthropic effort control, and cross-platform stability.
-- [2026-02] **TradingAgents v0.2.0** released with multi-provider LLM support (GPT-5.x, Gemini 3.x, Claude 4.x, Grok 4.x) and improved system architecture.
-- [2026-01] **Trading-R1** [Technical Report](https://arxiv.org/abs/2509.11420) released, with [Terminal](https://github.com/TauricResearch/Trading-R1) expected to land soon.
+- `000001.SZ`
+- `600000.SH`
+- `300750.SZ`
 
-<div align="center">
-<a href="https://www.star-history.com/#TauricResearch/TradingAgents&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=TauricResearch/TradingAgents&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=TauricResearch/TradingAgents&type=Date" />
-   <img alt="TradingAgents Star History" src="https://api.star-history.com/svg?repos=TauricResearch/TradingAgents&type=Date" style="width: 80%; height: auto;" />
- </picture>
-</a>
-</div>
+The agent workflow keeps four analyst channels:
 
-> 🎉 **TradingAgents** officially released! We have received numerous inquiries about the work, and we would like to express our thanks for the enthusiasm in our community.
->
-> So we decided to fully open-source the framework. Looking forward to building impactful projects with you!
+- Market: price, volume, valuation, liquidity, technical indicators, money flow,
+  limit-up/limit-down context, and optional iFinD real-time enrichment.
+- Social: local authorized Eastmoney Guba monitoring, Tushare hotness, iFinD
+  smart stock picking / popularity-style signals, news-derived proxy sentiment,
+  and explicit coverage diagnostics.
+- News: OpenNews query tools with Jin10 MCP fallback.
+- Fundamentals: Tushare structured financial data and Cninfo announcement
+  queries.
 
-<div align="center">
+The original US-market tool schemas such as Yahoo Finance, Alpha Vantage,
+Reddit, insider transactions, and SPY alpha are not exposed to the active
+A-share analyst agents.
 
-🚀 [TradingAgents](#tradingagents-framework) | ⚡ [Installation & CLI](#installation-and-cli) | 🎬 [Demo](https://www.youtube.com/watch?v=90gr5lwjIho) | 📦 [Package Usage](#tradingagents-package) | 🤝 [Contributing](#contributing) | 📄 [Citation](#citation)
+## Data Sources
 
-</div>
+You must apply for and manage your own data-source accounts. This repository
+does not include, redistribute, or sublicense any third-party financial data.
 
-## TradingAgents Framework
+| Channel | Source | Used For | Credential | Application / Docs |
+| --- | --- | --- | --- | --- |
+| Market | Tushare Pro | Daily/weekly/monthly OHLCV, daily basic, money flow, limit data, financial tables | `TUSHARE_TOKEN` | [Tushare Pro](https://tushare.pro), [token guide](https://tushare.pro/document/1?doc_id=39) |
+| Market / Social | iFinD QuantAPI | Optional real-time quote and smart stock picking / popularity-style enrichment | `IFIND_ACCESS_TOKEN`, `IFIND_REFRESH_TOKEN` | [iFinD QuantAPI examples](https://quantapi.51ifind.com/gwstatic/static/ds_web/quantapi-web/example.html), [help center](https://ftwc.51ifind.com/gwstatic/static/ds_web/quantapi-web/help-center.html) |
+| News | OpenNews MCP / REST | News search and latest market information | `OPENNEWS_TOKEN` | [opennews-mcp README](https://github.com/6551Team/opennews-mcp/blob/main/docs/README_ZH.md), [token portal](https://6551.io/mcp) |
+| News fallback | Jin10 MCP | Flash/news fallback when OpenNews is unavailable or empty | `JIN10_MCP_TOKEN` | [Jin10 MCP docs](https://mcp.jin10.com/app/doc.html) |
+| Fundamentals | Cninfo / Juchao WebAPI | Public company announcements and disclosure links | usually no local API key | [Cninfo](https://www.cninfo.com.cn/), [Cninfo WebAPI](https://webapi.cninfo.com.cn/#/apiDoc) |
+| Social | Eastmoney Guba | Authorized browser-session forum post monitoring | local browser login only | [Eastmoney Guba](https://guba.eastmoney.com.cn/) |
+| Social optional | Xueqiu | Experimental browser-session monitoring; may be blocked by verification | local browser login only | [Xueqiu](https://xueqiu.com/) |
 
-TradingAgents is a multi-agent trading framework that mirrors the dynamics of real-world trading firms. By deploying specialized LLM-powered agents: from fundamental analysts, sentiment experts, and technical analysts, to trader, risk management team, the platform collaboratively evaluates market conditions and informs trading decisions. Moreover, these agents engage in dynamic discussions to pinpoint the optimal strategy.
+### Social Data Compliance
 
-<p align="center">
-  <img src="assets/schema.png" style="width: 100%; height: auto;">
-</p>
+The social monitor uses a local Playwright browser profile and manual login. It
+does not implement captcha bypass, proxy pools, fingerprint spoofing, credential
+sharing, or anti-bot circumvention. If a platform requires verification or blocks
+automation, the collector records a structured failure and the agents continue
+with available signals.
 
-> TradingAgents framework is designed for research purposes. Trading performance may vary based on many factors, including the chosen backbone language models, model temperature, trading periods, the quality of data, and other non-deterministic factors. [It is not intended as financial, investment, or trading advice.](https://tauric.ai/disclaimer/)
+## Installation
 
-Our framework decomposes complex trading tasks into specialized roles. This ensures the system achieves a robust, scalable approach to market analysis and decision-making.
+Python 3.13 is recommended.
 
-### Analyst Team
-- Fundamentals Analyst: Evaluates company financials and performance metrics, identifying intrinsic values and potential red flags.
-- Sentiment Analyst: Analyzes social media and public sentiment using sentiment scoring algorithms to gauge short-term market mood.
-- News Analyst: Monitors global news and macroeconomic indicators, interpreting the impact of events on market conditions.
-- Technical Analyst: Utilizes technical indicators (like MACD and RSI) to detect trading patterns and forecast price movements.
-
-<p align="center">
-  <img src="assets/analyst.png" width="100%" style="display: inline-block; margin: 0 2%;">
-</p>
-
-### Researcher Team
-- Comprises both bullish and bearish researchers who critically assess the insights provided by the Analyst Team. Through structured debates, they balance potential gains against inherent risks.
-
-<p align="center">
-  <img src="assets/researcher.png" width="70%" style="display: inline-block; margin: 0 2%;">
-</p>
-
-### Trader Agent
-- Composes reports from the analysts and researchers to make informed trading decisions. It determines the timing and magnitude of trades based on comprehensive market insights.
-
-<p align="center">
-  <img src="assets/trader.png" width="70%" style="display: inline-block; margin: 0 2%;">
-</p>
-
-### Risk Management and Portfolio Manager
-- Continuously evaluates portfolio risk by assessing market volatility, liquidity, and other risk factors. The risk management team evaluates and adjusts trading strategies, providing assessment reports to the Portfolio Manager for final decision.
-- The Portfolio Manager approves/rejects the transaction proposal. If approved, the order will be sent to the simulated exchange and executed.
-
-<p align="center">
-  <img src="assets/risk.png" width="70%" style="display: inline-block; margin: 0 2%;">
-</p>
-
-## Installation and CLI
-
-### Installation
-
-Clone TradingAgents:
-```bash
-git clone https://github.com/TauricResearch/TradingAgents.git
-cd TradingAgents
-```
-
-Create a virtual environment in any of your favorite environment managers:
-```bash
-conda create -n tradingagents python=3.13
-conda activate tradingagents
-```
-
-Install the package and its dependencies:
-```bash
-pip install .
-```
-
-### Docker
-
-Alternatively, run with Docker:
-```bash
-cp .env.example .env  # add your API keys
-docker compose run --rm tradingagents
-```
-
-For local models with Ollama:
-```bash
-docker compose --profile ollama run --rm tradingagents-ollama
-```
-
-### Required APIs
-
-TradingAgents supports multiple LLM providers. Set the API key for your chosen provider:
+Always enter the virtual environment before installing dependencies or starting
+the CLI. `pip install -e .` installs the Python dependencies declared by the
+project, including Playwright. The launch scripts then ensure Playwright's
+Chromium runtime is present before entering the CLI, so users do not need to run
+any separate Playwright install command.
 
 ```bash
-export OPENAI_API_KEY=...          # OpenAI (GPT)
-export GOOGLE_API_KEY=...          # Google (Gemini)
-export ANTHROPIC_API_KEY=...       # Anthropic (Claude)
-export XAI_API_KEY=...             # xAI (Grok)
-export DEEPSEEK_API_KEY=...        # DeepSeek
-export DASHSCOPE_API_KEY=...       # Qwen (Alibaba DashScope)
-export ZHIPU_API_KEY=...           # GLM (Zhipu)
-export OPENROUTER_API_KEY=...      # OpenRouter
-export ALPHA_VANTAGE_API_KEY=...   # Alpha Vantage
+git clone https://github.com/<your-account>/BigA-Analysis-Agents.git
+cd BigA-Analysis-Agents
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
 ```
 
-For enterprise providers (e.g. Azure OpenAI, AWS Bedrock), copy `.env.enterprise.example` to `.env.enterprise` and fill in your credentials.
+Recommended launch sequence:
 
-For local models, configure Ollama with `llm_provider: "ollama"` in your config.
+```bash
+source .venv/bin/activate
+pip install -e .
+./start.sh
+```
 
-Alternatively, copy `.env.example` to `.env` and fill in your keys:
+On Windows:
+
+```bat
+.venv\Scripts\activate
+pip install -e .
+start.bat
+```
+
+## Configuration
+
+Copy the example environment file and fill in only the credentials you actually
+use:
+
 ```bash
 cp .env.example .env
 ```
 
-### CLI Usage
+Core A-share data variables:
 
-Launch the interactive CLI:
+```env
+TUSHARE_TOKEN=
+
+OPENNEWS_TOKEN=
+OPENNEWS_API_BASE=https://ai.6551.io
+OPENNEWS_WSS_URL=wss://ai.6551.io/open/news_wss
+OPENNEWS_MCP_URL=
+
+JIN10_MCP_TOKEN=
+JIN10_MCP_URL=https://mcp.jin10.com/mcp
+
+IFIND_ENABLED=true
+IFIND_API_BASE=https://quantapi.51ifind.com/api/v1
+IFIND_ACCESS_TOKEN=
+IFIND_REFRESH_TOKEN=
+IFIND_TIMEOUT_SECONDS=20
+
+SOCIAL_MONITOR_ENABLED=false
+SOCIAL_BROWSER_PROFILE_DIR=~/.tradingagents/social_browser
+SOCIAL_MONITOR_SOURCES=eastmoney_guba,xueqiu
+SOCIAL_MONITOR_INTERVAL_SECONDS=300
+SOCIAL_MONITOR_MAX_POSTS_PER_SYMBOL=200
+SOCIAL_MONITOR_MAX_PAGES=3
+SOCIAL_EASTMONEY_PAGE_SETTLE_MS=1200
+SOCIAL_EASTMONEY_ENABLE_SCROLL=false
+```
+
+LLM provider keys are also configured through `.env`, for example
+`OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, `DASHSCOPE_API_KEY`, or other supported
+providers.
+
+Never commit `.env`, browser profiles, SQLite databases, JSONL caches, exported
+reports, cookies, HAR files, or trace archives.
+
+## CLI Usage
+
+Start the interactive analysis flow:
+
 ```bash
-tradingagents          # installed command
-python -m cli.main     # alternative: run directly from source
-```
-You will see a screen where you can select your desired tickers, analysis date, LLM provider, research depth, and more.
-
-<p align="center">
-  <img src="assets/cli/cli_init.png" width="100%" style="display: inline-block; margin: 0 2%;">
-</p>
-
-An interface will appear showing results as they load, letting you track the agent's progress as it runs.
-
-<p align="center">
-  <img src="assets/cli/cli_news.png" width="100%" style="display: inline-block; margin: 0 2%;">
-</p>
-
-<p align="center">
-  <img src="assets/cli/cli_transaction.png" width="100%" style="display: inline-block; margin: 0 2%;">
-</p>
-
-## TradingAgents Package
-
-### Implementation Details
-
-We built TradingAgents with LangGraph to ensure flexibility and modularity. The framework supports multiple LLM providers: OpenAI, Google, Anthropic, xAI, DeepSeek, Qwen (Alibaba DashScope), GLM (Zhipu), OpenRouter, Ollama for local models, and Azure OpenAI for enterprise.
-
-### Python Usage
-
-To use TradingAgents inside your code, you can import the `tradingagents` module and initialize a `TradingAgentsGraph()` object. The `.propagate()` function will return a decision. You can run `main.py`, here's also a quick example:
-
-```python
-from tradingagents.graph.trading_graph import TradingAgentsGraph
-from tradingagents.default_config import DEFAULT_CONFIG
-
-ta = TradingAgentsGraph(debug=True, config=DEFAULT_CONFIG.copy())
-
-# forward propagate
-_, decision = ta.propagate("NVDA", "2026-01-15")
-print(decision)
+python -m cli.main analyze
 ```
 
-You can also adjust the default configuration to set your own choice of LLMs, debate rounds, etc.
+Then enter an A-share `ts_code`, for example `300750.SZ`.
+During Step 2, the CLI asks whether to enable Eastmoney Guba community
+sentiment. If you choose yes, Chrome opens the stock's Guba page.
+Log in with your own Eastmoney account, complete any manual
+verification, return to the terminal, and choose `I have completed login` to run
+a one-time local collection before the analysis continues.
+
+Convenience launch scripts are also provided:
+
+```bash
+./start.sh
+```
+
+On Windows:
+
+```bat
+start.bat
+```
+
+Run data-source smoke tests:
+
+```bash
+python -m cli.main ifind-smoke --symbol 300750.SZ
+```
+
+Manual social login:
+
+```bash
+python -m cli.main social-login
+```
+
+Collect Eastmoney Guba / Xueqiu posts with the local browser session:
+
+```bash
+python -m cli.main social-monitor --symbols 300750.SZ --once --sources eastmoney_guba
+```
+
+For continuous monitoring:
+
+```bash
+python -m cli.main social-monitor --symbols 300750.SZ,000001.SZ --loop --sources eastmoney_guba
+```
+
+## Python Usage
 
 ```python
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 
 config = DEFAULT_CONFIG.copy()
-config["llm_provider"] = "openai"        # openai, google, anthropic, xai, deepseek, qwen, glm, openrouter, ollama, azure
-config["deep_think_llm"] = "gpt-5.4"     # Model for complex reasoning
-config["quick_think_llm"] = "gpt-5.4-mini" # Model for quick tasks
-config["max_debate_rounds"] = 2
+config["llm_provider"] = "openai"
+config["deep_think_llm"] = "gpt-5.4"
+config["quick_think_llm"] = "gpt-5.4-mini"
 
-ta = TradingAgentsGraph(debug=True, config=config)
-_, decision = ta.propagate("NVDA", "2026-01-15")
+graph = TradingAgentsGraph(debug=True, config=config)
+state, decision = graph.propagate("300750.SZ", "2026-04-28")
 print(decision)
 ```
 
-See `tradingagents/default_config.py` for all configuration options.
+## Architecture Notes
 
-## Persistence and Recovery
+The active A-share tool set is:
 
-TradingAgents persists two kinds of state across runs.
+- `get_a_share_ohlcv`
+- `get_a_share_market_snapshot`
+- `get_a_share_indicators`
+- `get_a_share_moneyflow`
+- `get_a_share_social_sentiment`
+- `get_a_share_hotness`
+- `get_social_monitoring_coverage`
+- `search_a_share_news`
+- `get_cn_macro_news`
+- `get_a_share_company_profile`
+- `get_a_share_financials`
+- `get_a_share_announcements`
+- `get_a_share_fundamental_snapshot`
 
-### Decision log
+Real-time OpenNews WebSocket ingestion is disabled by default. The default news
+path uses query tools; WebSocket caching can be enabled separately when needed.
 
-The decision log is always on. Each completed run appends its decision to `~/.tradingagents/memory/trading_memory.md`. On the next run for the same ticker, TradingAgents fetches the realised return (raw and alpha vs SPY), generates a one-paragraph reflection, and injects the most recent same-ticker decisions plus recent cross-ticker lessons into the Portfolio Manager prompt, so each analysis carries forward what worked and what didn't.
+iFinD is enabled as an optional enrichment source by default. If iFinD returns an
+error or no rows, the main analysis continues and the report includes diagnostic
+fields such as endpoint, HTTP status, error code, and message.
 
-Override the path with `TRADINGAGENTS_MEMORY_LOG_PATH`.
+## Local State
 
-### Checkpoint resume
+Runtime state is written under `~/.tradingagents` by default:
 
-Checkpoint resume is opt-in via `--checkpoint`. When enabled, LangGraph saves state after each node so a crashed or interrupted run resumes from the last successful step instead of starting over. On a resume run you will see `Resuming from step N for <TICKER> on <date>` in the logs; on a new run you will see `Starting fresh`. Checkpoints are cleared automatically on successful completion.
+- cache files for Tushare, OpenNews, Jin10, Cninfo, and social events
+- social monitor SQLite database
+- browser profile for authorized forum monitoring
+- memory log for prior decisions and reflections
 
-Per-ticker SQLite databases live at `~/.tradingagents/cache/checkpoints/<TICKER>.db` (override the base with `TRADINGAGENTS_CACHE_DIR`). Use `--clear-checkpoints` to reset all of them before a run.
+These files are local-only and must not be published.
+
+## Testing
 
 ```bash
-tradingagents analyze --checkpoint           # enable for this run
-tradingagents analyze --clear-checkpoints    # reset before running
+python -m pytest -q
 ```
 
-```python
-config = DEFAULT_CONFIG.copy()
-config["checkpoint_enabled"] = True
-ta = TradingAgentsGraph(config=config)
-_, decision = ta.propagate("NVDA", "2026-01-15")
+Targeted A-share dataflow tests:
+
+```bash
+python -m pytest tests/test_a_share_dataflows.py -q
 ```
 
-## Contributing
+## Open Source Attribution
 
-We welcome contributions from the community! Whether it's fixing a bug, improving documentation, or suggesting a new feature, your input helps make this project better. If you are interested in this line of research, please consider joining our open-source financial AI research community [Tauric Research](https://tauric.ai/).
+This project is a derivative work of
+[TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents),
+which is licensed under the Apache License 2.0. The upstream framework, agent
+workflow, and portions of the original codebase remain credited to their
+original authors.
 
-Past contributions, including code, design feedback, and bug reports, are credited per release in [`CHANGELOG.md`](CHANGELOG.md).
+Major changes in this fork include:
 
-## Citation
+- China A-share `ts_code` symbol normalization.
+- Tushare/iFinD/OpenNews/Jin10/Cninfo dataflow integration.
+- Eastmoney Guba authorized browser-session social monitoring.
+- A-share specific analyst prompts and tool schemas.
+- CSI 300 benchmark reflection instead of SPY-based alpha.
 
-Please reference our work if you find *TradingAgents* provides you with some help :)
+## License
 
-```
-@misc{xiao2025tradingagentsmultiagentsllmfinancial,
-      title={TradingAgents: Multi-Agents LLM Financial Trading Framework}, 
-      author={Yijia Xiao and Edward Sun and Di Luo and Wei Wang},
-      year={2025},
-      eprint={2412.20138},
-      archivePrefix={arXiv},
-      primaryClass={q-fin.TR},
-      url={https://arxiv.org/abs/2412.20138}, 
-}
-```
+This repository is distributed under the Apache License 2.0. See
+[LICENSE](LICENSE).
+
+## Disclaimer
+
+BigA-Analysis-Agents is for research, education, and personal analytical workflow
+experiments only. The outputs may be incomplete, delayed, inaccurate, or affected
+by model hallucination and third-party data-source availability. You are solely
+responsible for verifying all information and for any investment or trading
+decisions you make.

@@ -1,0 +1,11 @@
+BigA-Analysis-Agents
+
+This project is a derivative work based on TauricResearch/TradingAgents:
+https://github.com/TauricResearch/TradingAgents
+
+The upstream project is licensed under the Apache License, Version 2.0.
+This fork keeps the Apache License 2.0 and adds China A-share specific data
+providers, prompts, tool schemas, CLI behavior, and documentation.
+
+No third-party market data, credentials, browser cookies, local caches, or
+exported analysis reports are distributed with this repository.

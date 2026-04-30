@@ -24,6 +24,28 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
+def _output_language() -> str:
+    from tradingagents.dataflows.config import get_config
+
+    return get_config().get("output_language", "English").strip().lower()
+
+
+def _is_chinese_output() -> bool:
+    return _output_language() in {"chinese", "中文", "zh", "zh-cn", "zh_cn"}
+
+
+def _localized_rating(rating: PortfolioRating) -> str:
+    if not _is_chinese_output():
+        return rating.value
+    return {
+        PortfolioRating.BUY: "买入",
+        PortfolioRating.OVERWEIGHT: "增持",
+        PortfolioRating.HOLD: "持有",
+        PortfolioRating.UNDERWEIGHT: "减持",
+        PortfolioRating.SELL: "卖出",
+    }[rating]
+
+
 # ---------------------------------------------------------------------------
 # Shared rating types
 # ---------------------------------------------------------------------------
@@ -92,12 +114,25 @@ class ResearchPlan(BaseModel):
 
 def render_research_plan(plan: ResearchPlan) -> str:
     """Render a ResearchPlan to markdown for storage and the trader's prompt context."""
+    if _is_chinese_output():
+        labels = {
+            "recommendation": "投资建议",
+            "rationale": "理由",
+            "strategic_actions": "行动计划",
+        }
+    else:
+        labels = {
+            "recommendation": "Recommendation",
+            "rationale": "Rationale",
+            "strategic_actions": "Strategic Actions",
+        }
+
     return "\n".join([
-        f"**Recommendation**: {plan.recommendation.value}",
+        f"**{labels['recommendation']}**: {_localized_rating(plan.recommendation)}",
         "",
-        f"**Rationale**: {plan.rationale}",
+        f"**{labels['rationale']}**: {plan.rationale}",
         "",
-        f"**Strategic Actions**: {plan.strategic_actions}",
+        f"**{labels['strategic_actions']}**: {plan.strategic_actions}",
     ])
 
 
@@ -145,17 +180,40 @@ def render_trader_proposal(proposal: TraderProposal) -> str:
     preserved for backward compatibility with the analyst stop-signal text
     and any external code that greps for it.
     """
+    if _is_chinese_output():
+        labels = {
+            "action": "操作建议",
+            "reasoning": "理由",
+            "entry_price": "入场价",
+            "stop_loss": "止损价",
+            "position_sizing": "仓位建议",
+        }
+        action = {
+            TraderAction.BUY: "买入",
+            TraderAction.HOLD: "持有",
+            TraderAction.SELL: "卖出",
+        }[proposal.action]
+    else:
+        labels = {
+            "action": "Action",
+            "reasoning": "Reasoning",
+            "entry_price": "Entry Price",
+            "stop_loss": "Stop Loss",
+            "position_sizing": "Position Sizing",
+        }
+        action = proposal.action.value
+
     parts = [
-        f"**Action**: {proposal.action.value}",
+        f"**{labels['action']}**: {action}",
         "",
-        f"**Reasoning**: {proposal.reasoning}",
+        f"**{labels['reasoning']}**: {proposal.reasoning}",
     ]
     if proposal.entry_price is not None:
-        parts.extend(["", f"**Entry Price**: {proposal.entry_price}"])
+        parts.extend(["", f"**{labels['entry_price']}**: {proposal.entry_price}"])
     if proposal.stop_loss is not None:
-        parts.extend(["", f"**Stop Loss**: {proposal.stop_loss}"])
+        parts.extend(["", f"**{labels['stop_loss']}**: {proposal.stop_loss}"])
     if proposal.position_sizing:
-        parts.extend(["", f"**Position Sizing**: {proposal.position_sizing}"])
+        parts.extend(["", f"**{labels['position_sizing']}**: {proposal.position_sizing}"])
     parts.extend([
         "",
         f"FINAL TRANSACTION PROPOSAL: **{proposal.action.value.upper()}**",
@@ -214,15 +272,32 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
     ``**Executive Summary**``, ``**Investment Thesis**``) that downstream
     parsers and the report writers already handle.
     """
+    if _is_chinese_output():
+        labels = {
+            "rating": "评级",
+            "executive_summary": "执行摘要",
+            "investment_thesis": "投资逻辑",
+            "price_target": "目标价",
+            "time_horizon": "投资期限",
+        }
+    else:
+        labels = {
+            "rating": "Rating",
+            "executive_summary": "Executive Summary",
+            "investment_thesis": "Investment Thesis",
+            "price_target": "Price Target",
+            "time_horizon": "Time Horizon",
+        }
+
     parts = [
-        f"**Rating**: {decision.rating.value}",
+        f"**{labels['rating']}**: {_localized_rating(decision.rating)}",
         "",
-        f"**Executive Summary**: {decision.executive_summary}",
+        f"**{labels['executive_summary']}**: {decision.executive_summary}",
         "",
-        f"**Investment Thesis**: {decision.investment_thesis}",
+        f"**{labels['investment_thesis']}**: {decision.investment_thesis}",
     ]
     if decision.price_target is not None:
-        parts.extend(["", f"**Price Target**: {decision.price_target}"])
+        parts.extend(["", f"**{labels['price_target']}**: {decision.price_target}"])
     if decision.time_horizon:
-        parts.extend(["", f"**Time Horizon**: {decision.time_horizon}"])
+        parts.extend(["", f"**{labels['time_horizon']}**: {decision.time_horizon}"])
     return "\n".join(parts)

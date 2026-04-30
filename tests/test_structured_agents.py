@@ -21,6 +21,9 @@ from tradingagents.agents.schemas import (
     render_trader_proposal,
 )
 from tradingagents.agents.trader.trader import create_trader
+from tradingagents.agents.utils.structured import bind_structured
+from tradingagents.dataflows.config import set_config
+from tradingagents.default_config import DEFAULT_CONFIG
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +63,25 @@ class TestRenderTraderProposal:
         assert "Entry Price" not in md
         assert "Stop Loss" not in md
         assert "Position Sizing" not in md
+        assert "FINAL TRANSACTION PROPOSAL: **SELL**" in md
+
+    def test_chinese_output_localizes_user_visible_labels(self):
+        set_config({**DEFAULT_CONFIG, "output_language": "Chinese"})
+        try:
+            p = TraderProposal(
+                action=TraderAction.SELL,
+                reasoning="短期风险收益不利。",
+                stop_loss=11.0,
+                position_sizing="减仓至少50%",
+            )
+            md = render_trader_proposal(p)
+        finally:
+            set_config(DEFAULT_CONFIG.copy())
+
+        assert "**操作建议**: 卖出" in md
+        assert "**理由**: 短期风险收益不利。" in md
+        assert "**止损价**: 11.0" in md
+        assert "**仓位建议**: 减仓至少50%" in md
         assert "FINAL TRANSACTION PROPOSAL: **SELL**" in md
 
 
@@ -147,6 +169,19 @@ class TestTraderAgent:
         prompt = captured["prompt"]
         assert any("Proposed Investment Plan" in m["content"] for m in prompt)
 
+    def test_prompt_includes_output_language_instruction(self):
+        set_config({**DEFAULT_CONFIG, "output_language": "Chinese"})
+        try:
+            captured = {}
+            llm = _structured_trader_llm(captured)
+            trader = create_trader(llm)
+            trader(_make_trader_state())
+        finally:
+            set_config(DEFAULT_CONFIG.copy())
+
+        prompt = captured["prompt"]
+        assert any("Write your entire response in Chinese" in m["content"] for m in prompt)
+
     def test_falls_back_to_freetext_when_structured_unavailable(self):
         plain_response = (
             "**Action**: Sell\n\nGuidance cut hits margins.\n\n"
@@ -158,6 +193,41 @@ class TestTraderAgent:
         trader = create_trader(llm)
         result = trader(_make_trader_state())
         assert result["trader_investment_plan"] == plain_response
+
+    def test_bind_structured_skips_deepseek_reasoner_before_invocation(self, monkeypatch):
+        monkeypatch.delenv("TRADINGAGENTS_ENABLE_DEEPSEEK_STRUCTURED_OUTPUT", raising=False)
+        llm = MagicMock()
+        llm.model_name = "deepseek-reasoner"
+
+        structured = bind_structured(llm, TraderProposal, "Trader")
+
+        assert structured is None
+        llm.with_structured_output.assert_not_called()
+
+    def test_bind_structured_skips_deepseek_provider_models_before_invocation(self, monkeypatch):
+        monkeypatch.delenv("TRADINGAGENTS_ENABLE_DEEPSEEK_STRUCTURED_OUTPUT", raising=False)
+        for model in ("deepseek-reasoner", "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat"):
+            llm = MagicMock()
+            object.__setattr__(llm, "_tradingagents_provider", "deepseek")
+            llm.model_name = model
+
+            structured = bind_structured(llm, TraderProposal, "Trader")
+
+            assert structured is None
+            llm.with_structured_output.assert_not_called()
+
+    def test_bind_structured_allows_deepseek_when_escape_hatch_enabled(self, monkeypatch):
+        monkeypatch.setenv("TRADINGAGENTS_ENABLE_DEEPSEEK_STRUCTURED_OUTPUT", "1")
+        llm = MagicMock()
+        object.__setattr__(llm, "_tradingagents_provider", "deepseek")
+        llm.model_name = "deepseek-v4-pro"
+        structured = MagicMock()
+        llm.with_structured_output.return_value = structured
+
+        result = bind_structured(llm, TraderProposal, "Trader")
+
+        assert result is structured
+        llm.with_structured_output.assert_called_once_with(TraderProposal)
 
 
 # ---------------------------------------------------------------------------
