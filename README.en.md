@@ -97,12 +97,21 @@ Portfolio manager final decision with portfolio-level action and risk controls.
 
 Python 3.13 is recommended.
 
+With uv:
+
 ```bash
-git clone https://github.com/Bronny-62/BigA-Analysis-Agents.git
-cd BigA-Analysis-Agents
+uv sync
+source .venv/bin/activate
+./start.sh
+```
+
+Or with pip:
+
+```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
+./start.sh
 ```
 
 ## Configuration
